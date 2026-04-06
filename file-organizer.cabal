@@ -1,0 +1,30 @@
+cabal-version:       3.14
+name:                file-organizer
+version:             0.1.0.0
+synopsis:            Minimal file-organizer starter
+license:             MIT
+author:              blank-coffee
+maintainer:          josephgriego210@gmail.com
+build-type:          Simple
+extra-doc-files:     CHANGELOG.md
+
+common warnings
+  ghc-options: -Wall
+
+library
+  import:           warnings
+  hs-source-dirs:   src
+  exposed-modules:  Core.Scanner, Core.Detect, Core.Hash
+  build-depends:    base ^>=4.18,
+                    bytestring,
+                    cryptonite,
+                    directory,
+                    filepath
+  default-language: Haskell2010
+
+executable file-organizer
+  hs-source-dirs:   app, src
+  main-is:          Main.hs
+  other-modules:    Core.Scanner, Core.Detect, Core.Hash
+  build-depends:    base, bytestring, cryptonite, directory, filepath
+  default-language: Haskell2010
