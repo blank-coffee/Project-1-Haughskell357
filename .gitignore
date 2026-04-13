@@ -21,3 +21,21 @@ cabal.project.local
 cabal.project.local~
 .HTF/
 .ghc.environment.*
+
+
+# deleteme folder used by dedupe
+/test-data/deleteme/
+
+# local logs and outputs
+dedupe-output.txt
+*.log
+
+# cabal backup files
+*.cabal.bak
+*.fixbak
+
+
+# editor / OS junk
+.vscode/
+*.swp
+Thumbs.db
