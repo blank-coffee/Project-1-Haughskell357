@@ -39,3 +39,46 @@ dedupe-output.txt
 .vscode/
 *.swp
 Thumbs.db
+
+
+# Stack / build artifacts
+.stack-work/
+dist/
+*.o
+*.hi
+
+# Cabal / Haskell tooling
+cabal.project.local
+cabal.project.freeze
+
+# Editor and OS files
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and runtime files
+*.log
+logs/
+*.log.*
+/log/
+
+# Backups and temporary files created during fixes
+*.bak
+*.old
+*.orig
+*.tmp
+
+# Test data artifacts and transient folders used in tests
+/test-data/deleteme/
+/test-data-duplicates/
+/test-data-backup/
+
+
+# IDE and editor folders
+.vscode/
+.idea/
+
+# Secrets and local config
+.env
+.env.local
