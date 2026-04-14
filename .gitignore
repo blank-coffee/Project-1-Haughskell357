@@ -74,6 +74,9 @@ logs/
 /test-data-duplicates/
 /test-data-backup/
 
+# Scripts and local helpers (optional)
+dedupe-dryrun.ps1
+*.ps1.bak
 
 # IDE and editor folders
 .vscode/
