@@ -1,0 +1,50 @@
+[
+  {
+    "optionName": "hello",
+    "optionExt": ".txt",
+    "variants": [
+      { "variantLabel": "original + underscore", "singlePattern": "hello",      "numberedPattern": "hello_{N}",    "variantEnabled": true },
+      { "variantLabel": "parentheses",          "singlePattern": "hello",      "numberedPattern": "hello({N})",   "variantEnabled": true },
+      { "variantLabel": "copy suffix",          "singlePattern": "hello_copy", "numberedPattern": "hello_copy-{N}", "variantEnabled": true }
+    ]
+  },
+  {
+    "optionName": "image",
+    "optionExt": ".jpg",
+    "variants": [
+      { "variantLabel": "original + underscore", "singlePattern": "image",      "numberedPattern": "image_{N}",    "variantEnabled": true },
+      { "variantLabel": "copy suffix",          "singlePattern": "image_copy", "numberedPattern": "image_copy_{N}", "variantEnabled": true }
+    ]
+  },
+  {
+    "optionName": "README",
+    "optionExt": ".md",
+    "variants": [
+      { "variantLabel": "original + underscore", "singlePattern": "README",      "numberedPattern": "README_{N}",    "variantEnabled": true },
+      { "variantLabel": "copy suffix",          "singlePattern": "README_copy", "numberedPattern": "README_copy",    "variantEnabled": true }
+    ]
+  },
+  {
+    "optionName": "readonly",
+    "optionExt": ".txt",
+    "variants": [
+      { "variantLabel": "original + underscore", "singlePattern": "readonly", "numberedPattern": "readonly_{N}", "variantEnabled": true }
+    ]
+  },
+  {
+    "optionName": "salad",
+    "optionExt": ".jpg",
+    "variants": [
+      { "variantLabel": "original + underscore", "singlePattern": "salad",      "numberedPattern": "salad_{N}",    "variantEnabled": true },
+      { "variantLabel": "dash numbering",       "singlePattern": "salad",      "numberedPattern": "salad-{N}",    "variantEnabled": true }
+    ]
+  },
+  {
+    "optionName": "inner",
+    "optionExt": ".txt",
+    "variants": [
+      { "variantLabel": "original + underscore", "singlePattern": "inner",      "numberedPattern": "inner_{N}",    "variantEnabled": true },
+      { "variantLabel": "copy suffix",          "singlePattern": "inner_copy", "numberedPattern": "inner_copy",    "variantEnabled": true }
+    ]
+  }
+]

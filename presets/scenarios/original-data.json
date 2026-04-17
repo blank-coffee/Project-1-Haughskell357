@@ -1,0 +1,21 @@
+{
+  "presetName": "original-data",
+  "presetStructure": [
+    {
+      "folderPath": ".",
+      "folderFiles": [
+        { "entryOption": "hello",    "entryCount": 3 },
+        { "entryOption": "image",    "entryCount": 2 },
+        { "entryOption": "README",   "entryCount": 2 },
+        { "entryOption": "readonly", "entryCount": 1 },
+        { "entryOption": "salad",    "entryCount": 2 }
+      ]
+    },
+    {
+      "folderPath": "nested",
+      "folderFiles": [
+        { "entryOption": "inner", "entryCount": 2 }
+      ]
+    }
+  ]
+}

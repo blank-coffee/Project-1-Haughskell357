@@ -1,0 +1,18 @@
+{
+  "presetName": "nested",
+  "presetStructure": [
+    {
+      "folderPath": ".",
+      "folderFiles": [
+        { "entryOption": "hello",     "entryCount": 2 },
+        { "entryOption": "different", "entryCount": 1 }
+      ]
+    },
+    {
+      "folderPath": "nested",
+      "folderFiles": [
+        { "entryOption": "inner", "entryCount": 1 }
+      ]
+    }
+  ]
+}

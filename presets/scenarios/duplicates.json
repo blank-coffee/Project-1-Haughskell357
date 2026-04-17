@@ -1,0 +1,13 @@
+{
+  "presetName": "duplicates",
+  "presetStructure": [
+    {
+      "folderPath": ".",
+      "folderFiles": [
+        { "entryOption": "hello",     "entryCount": 3 },
+        { "entryOption": "different", "entryCount": 1 },
+        { "entryOption": "readonly",  "entryCount": 1 }
+      ]
+    }
+  ]
+}

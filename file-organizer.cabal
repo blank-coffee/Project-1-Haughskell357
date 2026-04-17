@@ -18,6 +18,20 @@ library
     , Core.Hash
     , Core.Duplicate
     , Core.Dedupe
+    , Tester.Types
+    , Tester.Templates
+    , Tester.Presets
+    , Tester.Scramble
+    , Tester.Build
+    , Tester.Menu
+    -- Test integration
+    , Tester.TestTypes
+    , Tester.TestScenarios
+    , Tester.TestRegistry
+    , Tester.TestRunner
+    , Tester.Tests.HashTests
+    , Tester.Tests.ScannerTests
+    , Tester.Tests.DedupeTests
   build-depends:
       base ^>=4.18
     , bytestring
@@ -26,6 +40,9 @@ library
     , filepath
     , containers
     , memory
+    , aeson
+    , random
+    , haskeline
   default-language: Haskell2010
 
 executable file-organizer
@@ -38,25 +55,10 @@ executable file-organizer
     , filepath
   default-language: Haskell2010
 
-test-suite spec
-  type: exitcode-stdio-1.0
-  hs-source-dirs: test
-  main-is: Spec.hs
-  other-modules:
-    TestUtils
-    UniqueDestSpec
-    RenameOrCopySpec
-    RemoveOriginalsSpec
-    FileOrganizerSpec
-    DedupeSpec
-    ScannerSpec
-    HashSpec
+executable tester
+  hs-source-dirs: app
+  main-is: Tester.hs
   build-depends:
       base ^>=4.18
     , file-organizer
-    , hspec
-    , process
-    , directory
-    , filepath
-    , time
   default-language: Haskell2010
