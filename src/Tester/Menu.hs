@@ -19,10 +19,11 @@ import Tester.TestRunner
 import Tester.TestScenarios (allScenarios, scenarioName, scenarioDesc)
 import Tester.TestTypes
 
-import Core.Scanner (listFilesRecursive)
-import Core.Detect  (detectType)
-import Core.Hash    (sha256File)
-import Core.Dedupe  (dedupe)
+import Core.Scanner   (listFilesRecursive)
+import Core.Detect    (detectType)
+import Core.Hash      (sha256File)
+import Core.Dedupe    (dedupe)
+import Core.Organizer (organizeByType)
 
 -- ─── Entry point ────────────────────────────────────────────────────────────
 
@@ -352,13 +353,25 @@ runOrganizerMenu = do
   outputStrLn "\n-- Run Organizer on test-root --"
   outputStrLn "  1) Dry-run scan   (prints type + hash for every file)"
   outputStrLn "  2) Dedupe         (moves duplicates into deleteme/)"
+  outputStrLn "  3) Full Organize  (sorts files into text/ images/ other/)"
   outputStrLn "  0) Back"
   choice <- ask "Choice: "
   case choice of
-    "1" -> liftIO runDryScan  >> runOrganizerMenu
-    "2" -> runDedupeMenu      >> runOrganizerMenu
+    "1" -> liftIO runDryScan      >> runOrganizerMenu
+    "2" -> runDedupeMenu          >> runOrganizerMenu
+    "3" -> liftIO runFullOrganize >> runOrganizerMenu
     "0" -> return ()
     _   -> outputStrLn "Invalid." >> runOrganizerMenu
+
+runFullOrganize :: IO ()
+runFullOrganize = do
+  files <- listFilesRecursive testRoot
+  if null files
+    then putStrLn "  test-root is empty -- build a preset first."
+    else do
+      putStrLn $ "\nOrganizing " ++ show (length files) ++ " file(s)..."
+      organizeByType testRoot files
+      putStrLn "Organization complete. Check test-root for text/, images/, and other/ folders."
 
 -- | Scan test-root and print type + truncated hash for every file.
 --   Matches the output format of the main executable's dry-run mode.
