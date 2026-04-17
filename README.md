@@ -17,3 +17,13 @@ https://unmm-my.sharepoint.com/:w/:g/personal/jgriego21_unm_edu/IQD1sMVPCgy_Ra5p
 - `make reset` — restores `test-data/` to its original unsorted state
 - `make test` — runs the test suite
 
+## GUI
+
+`gui.py` is a simple tkinter front-end for the file organizer. It requires Python 3 and tkinter (usually bundled with Python).
+
+```
+python3 gui.py
+```
+
+Use the **Browse** button to select any folder, then click **Sort Files** to run the organizer on it. Output and errors from the Haskell backend are shown in the scrollable text area below.
+
