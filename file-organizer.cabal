@@ -18,6 +18,7 @@ library
     , Core.Hash
     , Core.Duplicate
     , Core.Dedupe
+    , Core.Organizer
     , Tester.Types
     , Tester.Templates
     , Tester.Presets

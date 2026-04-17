@@ -1,3 +1,4 @@
+# Build and tool artifacts
 dist
 dist-*
 cabal-dev
@@ -22,10 +23,6 @@ cabal.project.local~
 .HTF/
 .ghc.environment.*
 
-
-# deleteme folder used by dedupe
-/test-data/deleteme/
-
 # local logs and outputs
 dedupe-output.txt
 *.log
@@ -34,61 +31,31 @@ dedupe-output.txt
 *.cabal.bak
 *.fixbak
 
-
 # editor / OS junk
 .vscode/
-*.swp
-Thumbs.db
-
-
-# Stack / build artifacts
-.stack-work/
-dist/
-*.o
-*.hi
-
-# Cabal / Haskell tooling
-cabal.project.local
-cabal.project.freeze
-
-# Editor and OS files
+.idea/
 *.swp
 *~
 .DS_Store
 Thumbs.db
 
-# Logs and runtime files
-*.log
-logs/
-*.log.*
-/log/
-
-# Backups and temporary files created during fixes
+# Backups and temporary files
 *.bak
 *.old
 *.orig
 *.tmp
 
-# Test data artifacts and transient folders used in tests
-/test-data/deleteme/
-/test-data-duplicates/
-/test-data-backup/
-
-# Scripts and local helpers (optional)
+# Scripts and local helpers
 dedupe-dryrun.ps1
 move-duplicates.ps1
 *.ps1.bak
-
-# IDE and editor folders
-.vscode/
-.idea/
+scripts/dedupe.sh
 
 # Secrets and local config
 .env
 .env.local
-s c r i p t s / d e d u p e . s h 
- 
- # --- Tester System Artifacts ---
+
+# --- Tester System Artifacts ---
 # The active testing directory created by buildScenario
 /test-root/
 
@@ -96,6 +63,5 @@ s c r i p t s / d e d u p e . s h
 /tester-manifest.json
 
 # User-created presets that aren't part of the core scenarios
-# (This allows you to keep your own test presets without pushing them to the group)
 /presets/*.json
 !/presets/scenarios/
