@@ -1,8 +1,3 @@
--- | Tests for Core.Hash.sha256File.
---
---   Adding a hash test: write a function  :: FilePath -> IO TestResult,
---   then add a TestSpec entry to hashTests.
-
 module Tester.Tests.HashTests (hashTests) where
 
 import System.FilePath ((</>))
@@ -11,22 +6,9 @@ import Core.Hash (sha256File)
 
 hashTests :: [TestSpec]
 hashTests =
-  [ TestSpec
-      { testName      = "hash: identical files produce the same digest"
-      , testScenarios = ["duplicates"]
-      , testVary      = False
-      , testRun       = hashIdenticalTest
-      }
-
-  , TestSpec
-      { testName      = "hash: distinct files produce different digests"
-      , testScenarios = ["duplicates", "nested"]
-      , testVary      = False
-      , testRun       = hashDistinctTest
-      }
+  [ TestSpec "hash: identical files produce the same digest" ["duplicates"] False hashIdenticalTest
+  , TestSpec "hash: distinct files produce different digests" ["duplicates", "nested"] False hashDistinctTest
   ]
-
--- ─── Test functions ──────────────────────────────────────────────────────────
 
 hashIdenticalTest :: FilePath -> IO TestResult
 hashIdenticalTest root = do

@@ -1,48 +1,42 @@
+{-# LANGUAGE LambdaCase #-}
 module Tester.Templates
   ( loadOptions
-  , saveOptions
+  , loadUserOptions
+  , loadStaticOptions
+  , saveUserOptions
+  , saveStaticOptions
   , upsertOption
   , removeOption
-  , optionsFile
   ) where
 
 import Data.Aeson (eitherDecodeFileStrict, encodeFile)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 import Tester.Types
 
-optionsFile :: FilePath
-optionsFile = "presets/options.json"
-
-staticOptionsFile :: FilePath
+optionsFile, staticOptionsFile :: FilePath
+optionsFile = "presets" </> "options.json"
 staticOptionsFile = "presets" </> "scenarios" </> "options.json"
 
 loadOptions :: IO [FileOption]
 loadOptions = do
-  userOpts <- loadOptsFromFile optionsFile
-  staticOpts <- loadOptsFromFile staticOptionsFile
-  -- Combine them. User options will overwrite static ones if names clash.
-  return $ foldl (flip upsertOption) staticOpts userOpts
+  u <- loadUserOptions
+  s <- loadStaticOptions
+  return $ foldl (flip upsertOption) s u
+
+loadUserOptions, loadStaticOptions :: IO [FileOption]
+loadUserOptions   = loadOptsFromFile optionsFile
+loadStaticOptions = loadOptsFromFile staticOptionsFile
 
 loadOptsFromFile :: FilePath -> IO [FileOption]
-loadOptsFromFile path = do
-  exists <- doesFileExist path
-  if not exists
-    then return []
-    else do
-      result <- eitherDecodeFileStrict path
-      case result of
-        Left err -> do
-          putStrLn $ "Warning: could not parse options file " ++ path ++ ": " ++ err
-          return []
-        Right os -> return os
+loadOptsFromFile path = doesFileExist path >>= \ex -> if not ex then return [] else eitherDecodeFileStrict path >>= \case
+  Left _   -> return []
+  Right os -> return os
 
-saveOptions :: [FileOption] -> IO ()
-saveOptions os = do
-  createDirectoryIfMissing True "presets"
-  encodeFile optionsFile os
+saveUserOptions, saveStaticOptions :: [FileOption] -> IO ()
+saveUserOptions os   = createDirectoryIfMissing True (takeDirectory optionsFile) >> encodeFile optionsFile os
+saveStaticOptions os = createDirectoryIfMissing True (takeDirectory staticOptionsFile) >> encodeFile staticOptionsFile os
 
--- | Insert or replace by optionName
 upsertOption :: FileOption -> [FileOption] -> [FileOption]
 upsertOption o os = o : filter (\x -> optionName x /= optionName o) os
 

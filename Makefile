@@ -1,18 +1,14 @@
-.PHONY: build run test clean reset
+.PHONY: build run tester clean reset
 
 build:
 	stack build
 
 run:
-	stack run -- test-data 1000
+	stack run file-organizer -- test-root
 
-test:
-	stack test
-
-reset:
-	rm -rf test-data
-	cp -r test-data-original test-data
+tester:
+	stack run tester
 
 clean:
 	stack clean
-	rm -rf .stack-work
+	rm -rf .stack-work test-root tester-manifest.json

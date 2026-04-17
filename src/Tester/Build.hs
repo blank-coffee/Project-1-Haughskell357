@@ -15,28 +15,39 @@ import System.Directory
   , renameFile
   )
 import System.FilePath ((</>), takeDirectory, takeFileName, takeExtension)
-import Control.Monad (forM, forM_, when)
+import Control.Monad (forM, forM_, when, void)
 import Data.List (find)
 import Data.Aeson (encodeFile, eitherDecodeFileStrict)
+import System.Info (os)
+import System.Process (spawnCommand)
+import Control.Exception (try, SomeException)
 
 import Tester.Types
 import Tester.Scramble (applyVariant, pickVariant, enabledVariants)
 
--- ─── Constants ──────────────────────────────────────────────────────────────
-
 testRoot :: FilePath
 testRoot = "test-root"
 
--- | Sits beside test-root, not inside it, so the organizer never sees it.
---   Survives clearTestRoot (intentional — vary still works after a clear),
---   but is removed by clearTestRoot since a cleared root makes it stale.
 manifestPath :: FilePath
 manifestPath = "tester-manifest.json"
 
+-- ─── OS Explorer Hooks ──────────────────────────────────────────────────────
+
+openExplorer :: IO ()
+openExplorer = do
+  let script | os == "mingw32" = "explorer.exe \"test-root\""
+             | os == "darwin"  = "open \"test-root\""
+             | otherwise       = "xdg-open \"test-root\""
+  void $ (try (void (spawnCommand script)) :: IO (Either SomeException ()))
+
+closeExplorer :: IO ()
+closeExplorer = do
+  let script | os == "mingw32" = "powershell -Command \"(New-Object -comObject Shell.Application).Windows() | ? { $_.LocationName -eq 'test-root' } | % { $_.Quit() }\""
+             | otherwise       = "wmctrl -c \"test-root\""
+  void $ (try (void (spawnCommand script)) :: IO (Either SomeException ()))
+
 -- ─── Build ──────────────────────────────────────────────────────────────────
 
--- | Resolve a preset to disk, writing empty files at base names.
---   Saves a manifest so vary knows what to rename later.
 buildPreset :: [FileOption] -> Preset -> IO ()
 buildPreset options preset = do
   clearTestRoot
@@ -49,8 +60,7 @@ buildPreset options preset = do
     fmap concat $ forM (folderFiles folder) $ \entry ->
       case find (\o -> optionName o == entryOption entry) options of
         Nothing -> do
-          putStrLn $ "  Warning: no file option '"
-            ++ entryOption entry ++ "' -- skipping."
+          putStrLn $ "  Warning: no file option '" ++ entryOption entry ++ "' -- skipping."
           return []
         Just opt -> do
           let base = optionName opt
@@ -67,38 +77,33 @@ buildPreset options preset = do
               writeFile fp ""
               putStrLn $ "  created: " ++ fp
               return (ManifestEntry fp (optionName opt) (Just i))
+  
   encodeFile manifestPath entries
-  putStrLn $ "\nBuilt " ++ show (length entries) ++ " file(s).  Manifest saved."
+  putStrLn $ "\nBuilt " ++ show (length entries) ++ " file(s). Manifest saved."
+  openExplorer
 
 -- ─── Vary ───────────────────────────────────────────────────────────────────
 
--- | Rename every file in test-root to a randomly chosen enabled variant.
---   Reads the manifest to know option + index per file, then updates it.
 varyTestRoot :: [FileOption] -> IO ()
 varyTestRoot options = do
   exists <- doesFileExist manifestPath
   if not exists
     then putStrLn "No manifest found — build a preset first."
     else do
-      result <- eitherDecodeFileStrict manifestPath
-        :: IO (Either String [ManifestEntry])
+      result <- eitherDecodeFileStrict manifestPath :: IO (Either String [ManifestEntry])
       case result of
-        Left err ->
-          putStrLn $ "Manifest parse error: " ++ err
+        Left err -> putStrLn $ "Manifest parse error: " ++ err
         Right entries -> do
           updated <- forM entries $ \me ->
             case find (\o -> optionName o == mOptionName me) options of
               Nothing -> do
-                putStrLn $ "  Skipping — option '"
-                  ++ mOptionName me ++ "' not found."
+                putStrLn $ "  Skipping — option '" ++ mOptionName me ++ "' not found."
                 return me
               Just opt ->
                 let vs = variants opt in
                 if null (enabledVariants vs)
                   then do
-                    putStrLn $ "  Skipping '"
-                      ++ takeFileName (mCurrentPath me)
-                      ++ "' — no enabled variants."
+                    putStrLn $ "  Skipping '" ++ takeFileName (mCurrentPath me) ++ "' — no enabled variants."
                     return me
                   else do
                     v <- pickVariant vs
@@ -110,32 +115,26 @@ varyTestRoot options = do
                       if fileEx
                         then do
                           renameFile oldPath newPath
-                          putStrLn $ "  varied: "
-                            ++ takeFileName oldPath
-                            ++ "  ->  " ++ newName
-                        else
-                          putStrLn $ "  Warning: file not found: " ++ oldPath
+                          putStrLn $ "  varied: " ++ takeFileName oldPath ++ "  ->  " ++ newName
+                        else putStrLn $ "  Warning: file not found: " ++ oldPath
                     return me { mCurrentPath = newPath }
           encodeFile manifestPath updated
-          putStrLn "\nVariation complete.  Manifest updated."
+          putStrLn "\nVariation complete. Manifest updated."
 
 -- ─── Reset helpers ──────────────────────────────────────────────────────────
 
--- | Remove test-root and the manifest (which is now stale without a root).
 clearTestRoot :: IO ()
 clearTestRoot = do
+  closeExplorer
   removePathForcibly testRoot
   removePathForcibly manifestPath
   putStrLn $ "Cleared " ++ testRoot ++ "/"
 
--- | Wipe test-root, the manifest, and all user-created presets/options.
---   Preserves presets/scenarios/ so committed scenario preset files survive.
 fullReset :: IO ()
 fullReset = do
+  closeExplorer
   removePathForcibly testRoot
   removePathForcibly manifestPath
-  -- Remove options.json and any user preset .json files, but leave
-  -- the scenarios/ sub-directory untouched (those are version-controlled).
   presetsExists <- doesDirectoryExist "presets"
   when presetsExists $ do
     entries <- listDirectory "presets"

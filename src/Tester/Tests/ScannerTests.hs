@@ -1,63 +1,31 @@
--- | Tests for Core.Scanner.listFilesRecursive.
-
 module Tester.Tests.ScannerTests (scannerTests) where
 
 import Data.List (isSuffixOf, isPrefixOf)
-import System.FilePath ((</>))
 import Tester.TestTypes
 import Core.Scanner (listFilesRecursive)
 
 scannerTests :: [TestSpec]
 scannerTests =
-  [ TestSpec
-      { testName      = "scanner: finds inner.txt in nested sub-directory"
-      , testScenarios = ["nested"]
-      , testVary      = False
-      , testRun       = scannerNestedTest
-      }
-
-  , TestSpec
-      { testName      = "scanner: finds hello(1).txt at top level"
-      , testScenarios = ["nested", "duplicates"]
-      , testVary      = False
-      , testRun       = scannerTopLevelTest
-      }
-
-  , TestSpec
-      { testName      = "scanner: all returned paths are rooted under root"
-      , testScenarios = ["nested", "duplicates"]
-      , testVary      = False
-      , testRun       = scannerPrefixTest
-      }
-
-  , TestSpec
-      { testName      = "scanner: returns at least one file"
-      , testScenarios = ["nested", "duplicates"]
-      , testVary      = False
-      , testRun       = scannerNonEmptyTest
-      }
+  [ TestSpec "scanner: finds inner.txt in nested sub-directory" ["nested"] False scannerNestedTest
+  , TestSpec "scanner: finds hello(1).txt at top level" ["nested", "duplicates"] False scannerTopLevelTest
+  , TestSpec "scanner: all returned paths are rooted under root" ["nested", "duplicates"] False scannerPrefixTest
+  , TestSpec "scanner: returns at least one file" ["nested", "duplicates"] False scannerNonEmptyTest
   ]
-
--- ─── Test functions ──────────────────────────────────────────────────────────
 
 scannerNestedTest :: FilePath -> IO TestResult
 scannerNestedTest root = do
   files <- listFilesRecursive root
-  let found = any (isSuffixOf "inner.txt") files
-  return $ if found
+  return $ if any (isSuffixOf "inner.txt") files
     then Pass
     else Fail $ "inner.txt not found; paths returned: " ++ show files
 
 scannerTopLevelTest :: FilePath -> IO TestResult
 scannerTopLevelTest root = do
   files <- listFilesRecursive root
-  let found = any (isSuffixOf "hello(1).txt") files
-  return $ if found
+  return $ if any (isSuffixOf "hello(1).txt") files
     then Pass
     else Fail $ "hello(1).txt not found; paths returned: " ++ show files
 
--- | Every path returned must begin with root so callers never see
---   paths that escaped the directory they asked to scan.
 scannerPrefixTest :: FilePath -> IO TestResult
 scannerPrefixTest root = do
   files <- listFilesRecursive root

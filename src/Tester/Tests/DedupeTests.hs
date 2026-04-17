@@ -1,6 +1,3 @@
--- | Tests for Core.Dedupe: dedupe, groupByHash, uniqueDest, renameOrCopy,
---   and the removeOriginals flag.
-
 module Tester.Tests.DedupeTests (dedupeTests) where
 
 import System.Directory
@@ -24,50 +21,13 @@ import Core.Scanner (listFilesRecursive)
 
 dedupeTests :: [TestSpec]
 dedupeTests =
-  [ TestSpec
-      { testName      = "dedupe: creates deleteme directory"
-      , testScenarios = ["duplicates"]
-      , testVary      = False
-      , testRun       = dedupeCreatesDirTest
-      }
-
-  , TestSpec
-      { testName      = "dedupe: moves duplicate files into deleteme"
-      , testScenarios = ["duplicates"]
-      , testVary      = False
-      , testRun       = dedupeMovesDuplicatesTest
-      }
-
-  , TestSpec
-      { testName      = "dedupe: groupByHash groups identical files together"
-      , testScenarios = ["duplicates"]
-      , testVary      = False
-      , testRun       = groupByHashTest
-      }
-
-  , TestSpec
-      { testName      = "dedupe: removeOriginals leaves no duplicate groups in root"
-      , testScenarios = ["duplicates"]
-      , testVary      = False
-      , testRun       = removeOriginalsTest
-      }
-
-  , TestSpec
-      { testName      = "dedupe: uniqueDest avoids overwriting an existing file"
-      , testScenarios = ["duplicates", "nested"]
-      , testVary      = False
-      , testRun       = uniqueDestTest
-      }
-
-  , TestSpec
-      { testName      = "dedupe: renameOrCopy places file at destination"
-      , testScenarios = ["duplicates"]
-      , testVary      = False
-      , testRun       = renameOrCopyTest
-      }
+  [ TestSpec "dedupe: creates deleteme directory" ["duplicates"] False dedupeCreatesDirTest
+  , TestSpec "dedupe: moves duplicate files into deleteme" ["duplicates"] False dedupeMovesDuplicatesTest
+  , TestSpec "dedupe: groupByHash groups identical files together" ["duplicates"] False groupByHashTest
+  , TestSpec "dedupe: removeOriginals leaves no duplicate groups in root" ["duplicates"] False removeOriginalsTest
+  , TestSpec "dedupe: uniqueDest avoids overwriting an existing file" ["duplicates", "nested"] False uniqueDestTest
+  , TestSpec "dedupe: renameOrCopy places file at destination" ["duplicates"] False renameOrCopyTest
   ]
-
--- ─── Test functions ──────────────────────────────────────────────────────────
 
 dedupeCreatesDirTest :: FilePath -> IO TestResult
 dedupeCreatesDirTest root = do
@@ -85,7 +45,6 @@ dedupeMovesDuplicatesTest root = do
     then Pass
     else Fail "no files were moved into the deleteme directory"
 
--- | groupByHash should find at least one group of identical files.
 groupByHashTest :: FilePath -> IO TestResult
 groupByHashTest root = do
   files  <- listFilesRecursive root
@@ -95,8 +54,6 @@ groupByHashTest root = do
     then Pass
     else Fail "groupByHash found no duplicate groups (expected at least one)"
 
--- | After dedupe with removeOriginals=True, re-scanning the root (excluding
---   the deleteme folder) should reveal no remaining duplicate groups.
 removeOriginalsTest :: FilePath -> IO TestResult
 removeOriginalsTest root = do
   dedupe root True
@@ -110,7 +67,6 @@ removeOriginalsTest root = do
     else Fail $ "duplicate groups still present after removeOriginals=True: "
       ++ show (map (map fst) groups)
 
--- | uniqueDest should append "-1" (then "-2", etc.) when the target exists.
 uniqueDestTest :: FilePath -> IO TestResult
 uniqueDestTest root = do
   dest <- uniqueDest root "hello.txt"
@@ -120,10 +76,6 @@ uniqueDestTest root = do
     else Fail $ "expected uniqueDest to return '" ++ expected
       ++ "' but got '" ++ dest ++ "'"
 
--- | renameOrCopy must place the file at the destination regardless of
---   whether it renamed or fell back to copying.
---   Always restores the writable bit so the next buildScenario can
---   wipe test-root cleanly on Windows.
 renameOrCopyTest :: FilePath -> IO TestResult
 renameOrCopyTest root = do
   let src = root </> "readonly.txt"
@@ -136,8 +88,6 @@ renameOrCopyTest root = do
 
   outcome <- try (renameOrCopy src dst) :: IO (Either SomeException Bool)
 
-  -- Always restore writable so the next test's buildScenario can delete
-  -- test-root without a permission-denied error on Windows.
   srcStillExists <- doesFileExist src
   when srcStillExists $ setPermissions src (setOwnerWritable True perms)
 

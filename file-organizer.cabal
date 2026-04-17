@@ -45,6 +45,7 @@ library
     , aeson
     , random
     , haskeline
+    , process
   default-language: Haskell2010
 
 executable file-organizer
