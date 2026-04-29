@@ -12,3 +12,12 @@ tester:
 clean:
 	stack clean
 	rm -rf .stack-work test-root tester-manifest.json
+
+dry-run:
+    stack run file-organizer -- --dry-run test-root
+
+verbose:
+    stack run file-organizer -- --verbose test-root
+
+both:
+    stack run file-organizer -- --dry-run --verbose test-root

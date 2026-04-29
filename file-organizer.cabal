@@ -19,6 +19,7 @@ library
     , Core.Duplicate
     , Core.Dedupe
     , Core.Organizer
+    , Core.Backup
     , Tester.Types
     , Tester.Templates
     , Tester.Presets

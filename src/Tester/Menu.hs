@@ -373,3 +373,4 @@ printOutcomes outcomes = do
   outputStrLn (replicate 60 '-')
   let (p, f, t) = (passCount outcomes, failCount outcomes, length outcomes)
   outputStrLn $ "  Passed: " ++ show p ++ " / " ++ show t ++ (if f > 0 then " (" ++ show f ++ " failed)" else " ✓")
+  
