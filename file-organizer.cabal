@@ -19,6 +19,7 @@ library
     , Core.Duplicate
     , Core.Dedupe
     , Core.Organizer
+    , Core.Logger
     , Tester.Types
     , Tester.Templates
     , Tester.Presets
@@ -46,6 +47,7 @@ library
     , random
     , haskeline
     , process
+    , time
   default-language: Haskell2010
 
 executable file-organizer
