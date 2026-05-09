@@ -21,6 +21,7 @@ import Tester.TestRunner
 import Tester.TestScenarios (allScenarios, scenarioName, scenarioDesc)
 import Tester.TestTypes
 
+import Core.Logger    (withRunLog)
 import Core.Scanner   (listFilesRecursive)
 import Core.Detect    (detectType)
 import Core.Hash      (sha256File)
@@ -313,16 +314,16 @@ runOrganizerMenu = do
     _   -> runOrganizerMenu
 
 runFullOrganize :: IO ()
-runFullOrganize = do
-  files <- listFilesRecursive testRoot
+runFullOrganize = withRunLog testRoot $ \h -> do
+  files <- listFilesRecursive h testRoot
   if null files then putStrLn "  test-root is empty." else do
     putStrLn $ "\nOrganizing " ++ show (length files) ++ " file(s)..."
-    organizeByType testRoot files
+    organizeByType testRoot h files
     putStrLn "Organization complete."
 
 runDryScan :: IO ()
-runDryScan = do
-  files <- listFilesRecursive testRoot
+runDryScan = withRunLog testRoot $ \h -> do
+  files <- listFilesRecursive h testRoot
   if null files then putStrLn "  test-root is empty." else do
     putStrLn $ "\nScanning " ++ show (length files) ++ " file(s):\n"
     mapM_ showFileInfo files
@@ -341,7 +342,7 @@ runDedupeMenu :: InputT IO ()
 runDedupeMenu = do
   removeOrig <- yesNo "\nDelete originals after moving?"
   ok <- yesNo "Proceed?"
-  when ok $ liftIO (dedupe testRoot removeOrig) >> outputStrLn "Dedupe complete."
+  when ok $ liftIO (withRunLog testRoot $ \h -> dedupe testRoot removeOrig h) >> outputStrLn "Dedupe complete."
 
 runTestsMenu :: InputT IO ()
 runTestsMenu = do

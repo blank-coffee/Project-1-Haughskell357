@@ -9,26 +9,32 @@ import System.Directory
   , Permissions
   )
 import System.FilePath ((</>))
-import Control.Monad (filterM, forM)
+import System.IO (Handle)
+import Control.Monad (filterM)
 import qualified Data.Set as Set
 import Control.Exception (try, SomeException)
 
--- Public API: list all regular files under a directory (non-following symlink loops)
-listFilesRecursive :: FilePath -> IO [FilePath]
-listFilesRecursive root = go Set.empty [root]
+import Core.Logger (logDirSkip)
+
+listFilesRecursive :: Handle -> FilePath -> IO [FilePath]
+listFilesRecursive h root = go Set.empty [root]
   where
     go _ [] = return []
     go seen (d:ds) = do
       eres <- try (listDirectory d) :: IO (Either SomeException [FilePath])
       case eres of
-        Left _ -> go seen ds
+        Left e -> do
+          logDirSkip h d (show e)
+          go seen ds
         Right names -> do
           let paths = map (d </>) names
-          files <- filterM doesFileExist paths
-          dirs  <- filterM doesDirectoryExist paths
+          files        <- filterM doesFileExist paths
+          dirs         <- filterM doesDirectoryExist paths
           readableDirs <- filterM isReadable dirs
+          let skipped = filter (`notElem` readableDirs) dirs
+          mapM_ (\p -> logDirSkip h p "not readable") skipped
           let newDirs = filter (\p -> not (Set.member p seen)) readableDirs
-              seen' = foldr Set.insert seen newDirs
+              seen'   = foldr Set.insert seen newDirs
           rest <- go seen' (newDirs ++ ds)
           return (files ++ rest)
 
@@ -36,5 +42,5 @@ isReadable :: FilePath -> IO Bool
 isReadable p = do
   eres <- try (getPermissions p) :: IO (Either SomeException Permissions)
   case eres of
-    Left _    -> return False
+    Left _      -> return False
     Right perms -> return (readable perms)

@@ -2,6 +2,9 @@ module Core.Logger
   ( withRunLog
   , logMove
   , logSkip
+  , logDirSkip
+  , logDupeKept
+  , logDupeMoved
   ) where
 
 import System.Directory (createDirectoryIfMissing)
@@ -28,3 +31,12 @@ logMove h src dest = hPutStrLn h $ "MOVED   " ++ src ++ " -> " ++ dest
 
 logSkip :: Handle -> FilePath -> String -> IO ()
 logSkip h src reason = hPutStrLn h $ "SKIPPED " ++ src ++ ": " ++ reason
+
+logDirSkip :: Handle -> FilePath -> String -> IO ()
+logDirSkip h dir reason = hPutStrLn h $ "DIR-SKIP " ++ dir ++ ": " ++ reason
+
+logDupeKept :: Handle -> FilePath -> IO ()
+logDupeKept h path = hPutStrLn h $ "DUPE-KEPT " ++ path
+
+logDupeMoved :: Handle -> FilePath -> FilePath -> IO ()
+logDupeMoved h src dest = hPutStrLn h $ "DUPE-MOVED " ++ src ++ " -> " ++ dest

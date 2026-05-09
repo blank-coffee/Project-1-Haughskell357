@@ -15,6 +15,7 @@ import Control.Exception (try, SomeException)
 import Data.List (isPrefixOf)
 
 import Tester.TestTypes
+import Core.Logger (withRunLog)
 import Core.Dedupe (dedupe, groupByHash, uniqueDest, renameOrCopy)
 import Core.Hash (sha256File)
 import Core.Scanner (listFilesRecursive)
@@ -30,37 +31,37 @@ dedupeTests =
   ]
 
 dedupeCreatesDirTest :: FilePath -> IO TestResult
-dedupeCreatesDirTest root = do
-  dedupe root False
+dedupeCreatesDirTest root = withRunLog root $ \h -> do
+  dedupe root False h
   exists <- doesDirectoryExist (root </> "deleteme")
   return $ if exists
     then Pass
     else Fail "deleteme directory was not created by dedupe"
 
 dedupeMovesDuplicatesTest :: FilePath -> IO TestResult
-dedupeMovesDuplicatesTest root = do
-  dedupe root False
+dedupeMovesDuplicatesTest root = withRunLog root $ \h -> do
+  dedupe root False h
   files <- listDirectory (root </> "deleteme")
   return $ if not (null files)
     then Pass
     else Fail "no files were moved into the deleteme directory"
 
 groupByHashTest :: FilePath -> IO TestResult
-groupByHashTest root = do
-  files  <- listFilesRecursive root
-  hashed <- mapM (\f -> do h <- sha256File f; return (f, h)) files
+groupByHashTest root = withRunLog root $ \h -> do
+  files  <- listFilesRecursive h root
+  hashed <- mapM (\f -> do hsh <- sha256File f; return (f, hsh)) files
   let groups = groupByHash hashed
   return $ if not (null groups)
     then Pass
     else Fail "groupByHash found no duplicate groups (expected at least one)"
 
 removeOriginalsTest :: FilePath -> IO TestResult
-removeOriginalsTest root = do
-  dedupe root True
-  allFiles <- listFilesRecursive root
+removeOriginalsTest root = withRunLog root $ \h -> do
+  dedupe root True h
+  allFiles <- listFilesRecursive h root
   let deletemeDir   = root </> "deleteme"
       rootOnlyFiles = filter (not . isPrefixOf deletemeDir) allFiles
-  hashed <- mapM (\f -> do h <- sha256File f; return (f, h)) rootOnlyFiles
+  hashed <- mapM (\f -> do hsh <- sha256File f; return (f, hsh)) rootOnlyFiles
   let groups = groupByHash hashed
   return $ if null groups
     then Pass

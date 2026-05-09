@@ -2,20 +2,19 @@ module Core.Organizer (organizeByType) where
 
 import Core.Detect (detectType)
 import Core.Dedupe (renameOrCopy, uniqueDest)
-import Core.Logger (withRunLog, logMove, logSkip)
+import Core.Logger (logMove, logSkip)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeFileName)
 import System.IO (Handle)
 import Control.Exception (try, SomeException)
 import Data.List (isPrefixOf)
 
-organizeByType :: FilePath -> [FilePath] -> IO ()
-organizeByType root files = do
+organizeByType :: FilePath -> Handle -> [FilePath] -> IO ()
+organizeByType root h files = do
   createDirectoryIfMissing True (root <> "/text")
   createDirectoryIfMissing True (root <> "/images")
   createDirectoryIfMissing True (root <> "/other")
-  withRunLog root $ \h ->
-    mapM_ (moveFile root h) files
+  mapM_ (moveFile root h) files
 
 moveFile :: FilePath -> Handle -> FilePath -> IO ()
 moveFile root h src = do

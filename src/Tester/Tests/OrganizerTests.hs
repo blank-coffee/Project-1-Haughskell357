@@ -5,6 +5,7 @@ import System.Directory (doesFileExist)
 import Data.List (isPrefixOf, isSuffixOf)
 
 import Tester.TestTypes
+import Core.Logger (withRunLog)
 import Core.Organizer (organizeByType)
 import Core.Scanner (listFilesRecursive)
 
@@ -16,33 +17,33 @@ organizerTests =
   ]
 
 textSortingTest :: FilePath -> IO TestResult
-textSortingTest root = do
-  files <- listFilesRecursive root
-  organizeByType root files
-  newFiles <- listFilesRecursive root
-  let txtFiles = filter (\f -> any (`isSuffixOf` f) [".txt", ".md"]) newFiles
-      textDir  = root </> "text"
+textSortingTest root = withRunLog root $ \h -> do
+  files <- listFilesRecursive h root
+  organizeByType root h files
+  newFiles <- listFilesRecursive h root
+  let txtFiles  = filter (\f -> any (`isSuffixOf` f) [".txt", ".md"]) newFiles
+      textDir   = root </> "text"
       offenders = filter (not . isPrefixOf textDir) txtFiles
   return $ if null offenders && not (null txtFiles)
     then Pass
     else Fail $ "Text files not in text/ directory: " ++ show offenders
 
 imageSortingTest :: FilePath -> IO TestResult
-imageSortingTest root = do
-  files <- listFilesRecursive root
-  organizeByType root files
-  newFiles <- listFilesRecursive root
-  let imgFiles = filter (".jpg" `isSuffixOf`) newFiles
-      imgDir   = root </> "images"
+imageSortingTest root = withRunLog root $ \h -> do
+  files <- listFilesRecursive h root
+  organizeByType root h files
+  newFiles <- listFilesRecursive h root
+  let imgFiles  = filter (".jpg" `isSuffixOf`) newFiles
+      imgDir    = root </> "images"
       offenders = filter (not . isPrefixOf imgDir) imgFiles
   return $ if null offenders && not (null imgFiles)
     then Pass
     else Fail $ "Image files not in images/ directory: " ++ show offenders
 
 originalRemovalTest :: FilePath -> IO TestResult
-originalRemovalTest root = do
-  files <- listFilesRecursive root
-  organizeByType root files
+originalRemovalTest root = withRunLog root $ \h -> do
+  files <- listFilesRecursive h root
+  organizeByType root h files
   stillExists <- mapM doesFileExist files
   let remaining = [f | (f, ex) <- zip files stillExists, ex]
   return $ if null remaining
