@@ -27,7 +27,6 @@ import System.FilePath
 import System.IO (Handle)
 import Control.Exception (try, IOException)
 import Control.Monad
-import Data.List
 import qualified Data.Map.Strict as M
 
 import Core.Scanner (listFilesRecursive)
