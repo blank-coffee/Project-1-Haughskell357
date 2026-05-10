@@ -21,12 +21,17 @@ import Tester.TestRunner
 import Tester.TestScenarios (allScenarios, scenarioName, scenarioDesc)
 import Tester.TestTypes
 
-import Core.Logger    (withRunLog)
-import Core.Scanner   (listFilesRecursive)
-import Core.Detect    (detectType)
-import Core.Hash      (sha256File)
-import Core.Dedupe    (dedupe)
-import Core.Organizer (organizeByType)
+import Core.Logger     (withRunLog)
+import Core.Scanner    (listFilesRecursive)
+import Core.Detect     (detectType)
+import Core.Hash       (sha256File)
+import Core.Dedupe     (dedupe)
+import Core.Organizer  (OrganizeOptions(..), organizeByType, organizeByTypeWith)
+import Core.RulePresets
+  ( CustomRule(..), RulePreset(..)
+  , rulePresetsDir
+  , listRulePresets, loadRulePreset, saveRulePreset, deleteRulePreset
+  )
 
 runTester :: IO ()
 runTester = runInputT defaultSettings mainMenu
@@ -72,7 +77,7 @@ mainMenu = do
   outputStrLn "\n===============================\n    File Organizer Tester\n==============================="
   outputStrLn "  1) Load and build a preset\n  2) Manage Presets\n  3) Manage File Options"
   outputStrLn "  4) Vary test-root files\n  5) Clear test-root\n  6) Full reset"
-  outputStrLn "  7) Run organizer\n  8) Run tests\n  9) Quit\n==============================="
+  outputStrLn "  7) Run organizer\n  8) Run tests\n  9) Manage Sort Rules\n  0) Quit\n==============================="
   choice <- ask "Choice: "
   case choice of
     "1" -> loadPresetMenu >> mainMenu
@@ -83,7 +88,8 @@ mainMenu = do
     "6" -> yesNo "Remove test-root, manifest, options, and user presets?" >>= \ok -> when ok (liftIO fullReset) >> mainMenu
     "7" -> runOrganizerMenu >> mainMenu
     "8" -> runTestsMenu >> mainMenu
-    "9" -> outputStrLn "Goodbye!"
+    "9" -> manageRulesMenu >> mainMenu
+    "0" -> outputStrLn "Goodbye!"
     _   -> outputStrLn "Invalid choice." >> mainMenu
 
 -- ─── Menus & Forms ──────────────────────────────────────────────────────────
@@ -309,16 +315,43 @@ runOrganizerMenu = do
   ask "Choice: " >>= \case
     "1" -> withTestRoot (liftIO runDryScan) >> runOrganizerMenu
     "2" -> withTestRoot runDedupeMenu >> runOrganizerMenu
-    "3" -> withTestRoot (liftIO runFullOrganize) >> runOrganizerMenu
+    "3" -> withTestRoot (pickRulesAndOrganize) >> runOrganizerMenu
     "0" -> return ()
     _   -> runOrganizerMenu
 
-runFullOrganize :: IO ()
-runFullOrganize = withRunLog testRoot $ \h -> do
+pickRulesAndOrganize :: InputT IO ()
+pickRulesAndOrganize = do
+  rules <- pickRulePreset
+  liftIO (runFullOrganize rules)
+
+pickRulePreset :: InputT IO [CustomRule]
+pickRulePreset = do
+  presets <- liftIO listRulePresets
+  if null presets then return [] else do
+    useRules <- yesNo "Apply custom sort rules?"
+    if not useRules then return [] else do
+      outputStrLn "\n-- Select Rule Preset --"
+      numbered (map (\p -> takeFileName p) presets)
+      outputStrLn "  0) None (type-based only)"
+      choice <- ask "Choice: "
+      case readMaybe choice :: Maybe Int of
+        Just 0 -> return []
+        Just n | n >= 1 && n <= length presets -> do
+          res <- liftIO (loadRulePreset (presets !! (n-1)))
+          case res of
+            Left err -> outputStrLn ("Error: " ++ err) >> return []
+            Right p  -> do
+              outputStrLn $ "Using " ++ show (length (rulePresetRules p)) ++ " rule(s)."
+              return (rulePresetRules p)
+        _ -> return []
+
+runFullOrganize :: [CustomRule] -> IO ()
+runFullOrganize rules = withRunLog testRoot $ \h -> do
   files <- listFilesRecursive h testRoot
   if null files then putStrLn "  test-root is empty." else do
     putStrLn $ "\nOrganizing " ++ show (length files) ++ " file(s)..."
-    organizeByType testRoot h files
+    let opts = OrganizeOptions { optDryRun = False, optVerbose = False, optCustomRules = rules }
+    organizeByTypeWith opts testRoot h files
     putStrLn "Organization complete."
 
 runDryScan :: IO ()
@@ -343,6 +376,66 @@ runDedupeMenu = do
   removeOrig <- yesNo "\nDelete originals after moving?"
   ok <- yesNo "Proceed?"
   when ok $ liftIO (withRunLog testRoot $ \h -> dedupe testRoot removeOrig h) >> outputStrLn "Dedupe complete."
+
+-- ─── Sort Rules ─────────────────────────────────────────────────────────────
+
+manageRulesMenu :: InputT IO ()
+manageRulesMenu = do
+  outputStrLn "\n-- Manage Sort Rules --\n  1) List presets\n  2) Create preset\n  3) Delete preset\n  0) Back"
+  ask "Choice: " >>= \case
+    "1" -> listRulePresetsMenu >> manageRulesMenu
+    "2" -> createRulePresetMenu >> manageRulesMenu
+    "3" -> deleteRulePresetMenu >> manageRulesMenu
+    "0" -> return ()
+    _   -> outputStrLn "Invalid." >> manageRulesMenu
+
+listRulePresetsMenu :: InputT IO ()
+listRulePresetsMenu = do
+  presets <- liftIO listRulePresets
+  if null presets
+    then outputStrLn "  No rule presets saved."
+    else forM_ presets $ \path -> do
+      res <- liftIO (loadRulePreset path)
+      case res of
+        Left _  -> outputStrLn $ "  " ++ takeFileName path ++ " (error loading)"
+        Right p -> do
+          outputStrLn $ "\n  " ++ rulePresetName p ++ ":"
+          forM_ (rulePresetRules p) $ \r ->
+            outputStrLn $ "    \"" ++ ruleKeyword r ++ "\" -> " ++ ruleFolder r ++ "/"
+
+createRulePresetMenu :: InputT IO ()
+createRulePresetMenu = do
+  name <- ask "\nPreset name: "
+  if null name then return () else do
+    rules <- collectRules []
+    if null rules
+      then outputStrLn "  No rules added, discarded."
+      else do
+        let preset = RulePreset name rules
+            path   = rulePresetsDir </> map (\c -> if isSpace c then '-' else c) name ++ ".json"
+        liftIO $ saveRulePreset preset path
+        outputStrLn $ "Saved " ++ show (length rules) ++ " rule(s) to " ++ path
+
+collectRules :: [CustomRule] -> InputT IO [CustomRule]
+collectRules acc = do
+  outputStrLn $ "  (" ++ show (length acc) ++ " rule(s) so far)"
+  kw <- ask "Keyword to match (empty to finish): "
+  if null kw then return acc else do
+    folder <- ask "Sort into folder name: "
+    if null folder then return acc else
+      collectRules (acc ++ [CustomRule kw folder])
+
+deleteRulePresetMenu :: InputT IO ()
+deleteRulePresetMenu = do
+  presets <- liftIO listRulePresets
+  if null presets then outputStrLn "  No rule presets." else do
+    numbered (map takeFileName presets)
+    choice <- ask "Delete which number (0 to cancel)? "
+    case readMaybe choice :: Maybe Int of
+      Just n | n >= 1 && n <= length presets -> do
+        ok <- yesNo $ "Delete " ++ takeFileName (presets !! (n-1)) ++ "?"
+        when ok $ liftIO (deleteRulePreset (presets !! (n-1))) >> outputStrLn "Deleted."
+      _ -> return ()
 
 runTestsMenu :: InputT IO ()
 runTestsMenu = do

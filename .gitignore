@@ -55,6 +55,10 @@ scripts/dedupe.sh
 .env
 .env.local
 
+# Run logs and Claude Code session data
+.file-organizer-logs/
+.claude/
+
 # --- Tester System Artifacts ---
 # The active testing directory created by buildScenario
 /test-root/
@@ -65,3 +69,6 @@ scripts/dedupe.sh
 # User-created presets that aren't part of the core scenarios
 /presets/*.json
 !/presets/scenarios/
+
+# User-created rule presets
+/presets/rules/
