@@ -208,7 +208,29 @@ Undo is only enabled after a successful non‑dry‑run sort.
 
 ---
 
-## 9. Reset Workflow
+## 9. Run Logging
+
+Every run (sort, scan, dedupe) produces a timestamped log file inside the target folder:
+
+```
+<folder>/.file-organizer-logs/YYYY-MM-DD_HH-MM-SS.log
+```
+
+Log entries:
+
+| Tag | Meaning |
+|---|---|
+| `MOVED` | File successfully moved to its destination |
+| `SKIPPED` | File could not be classified or moved |
+| `DIR-SKIP` | Directory skipped (unreadable or inaccessible) |
+| `DUPE-KEPT` | File chosen as the keeper during deduplication |
+| `DUPE-MOVED` | Duplicate file moved to `deleteme/` |
+
+The `.file-organizer-logs/` directory is excluded from sorting and backups.
+
+---
+
+## 10. Reset Workflow
 
 The **Reset** button runs:
 
@@ -227,7 +249,7 @@ Not required for preset/config changes.
 ---
 
 
-## 10. Development Notes
+## 11. Development Notes
 
 ### **10.1 Process Safety**
 - Never modify `tester_process` outside `kill_tester_process()` or tester startup.
@@ -248,7 +270,7 @@ Not required for preset/config changes.
 
 ---
 
-## 11. Current Status
+## 12. Current Status
 
 The system now supports:
 
