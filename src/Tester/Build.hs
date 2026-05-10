@@ -19,7 +19,7 @@ import Control.Monad (forM, forM_, when, void)
 import Data.List (find)
 import Data.Aeson (encodeFile, eitherDecodeFileStrict)
 import System.Info (os)
-import System.Process (spawnCommand)
+import System.Process (spawnCommand, callCommand)
 import Control.Exception (try, SomeException)
 
 import Tester.Types
@@ -44,7 +44,8 @@ closeExplorer :: IO ()
 closeExplorer = do
   let script | os == "mingw32" = "powershell -Command \"(New-Object -comObject Shell.Application).Windows() | ? { $_.LocationName -eq 'test-root' } | % { $_.Quit() }\""
              | otherwise       = "wmctrl -c \"test-root\""
-  void $ (try (void (spawnCommand script)) :: IO (Either SomeException ()))
+  -- Use callCommand to wait for the process to finish before continuing
+  void $ (try (callCommand script) :: IO (Either SomeException ()))
 
 -- ─── Build ──────────────────────────────────────────────────────────────────
 
