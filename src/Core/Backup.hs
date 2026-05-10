@@ -19,7 +19,7 @@ import System.FilePath
   , takeFileName
   , splitDirectories
   )
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, when, unless)
 
 backupRoot :: FilePath -> IO FilePath
 backupRoot root = do
@@ -66,14 +66,12 @@ copyTree src dst = do
     let s = src </> e
         d = dst </> e
 
-    let ignored = ["backup", ".backup", "_backup"]
-    when (takeFileName s `elem` ignored) $
-      return ()
-
-    isDir  <- doesDirectoryExist s
-    isFile <- doesFileExist s
-    when isDir $ do
-      createDirectoryIfMissing True d
-      copyTree s d
-    when isFile $
-      copyFile s d
+    let ignored = ["backup", ".backup", "_backup", ".file-organizer-logs"]
+    unless (takeFileName s `elem` ignored) $ do
+      isDir  <- doesDirectoryExist s
+      isFile <- doesFileExist s
+      when isDir $ do
+        createDirectoryIfMissing True d
+        copyTree s d
+      when isFile $
+        copyFile s d
