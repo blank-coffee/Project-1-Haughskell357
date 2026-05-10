@@ -21,9 +21,11 @@ library
     , Core.Organizer
     , Core.Backup
     , Core.Logger
+    , Core.Standardize
     , Tester.Types
     , Tester.Templates
     , Tester.Presets
+    , Tester.NameMap
     , Tester.Scramble
     , Tester.Build
     , Tester.Menu

@@ -6,10 +6,14 @@ module Tester.Types
   , FolderEntry(..)
   , Preset(..)
   , ManifestEntry(..)
+  , NameStandard(..)
+  , ShapeRule(..)
+  , NameMapConfig(..)
   ) where
 
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON)
+import qualified Data.Map.Strict as M
 
 data Variant = Variant
   { variantLabel    :: String
@@ -62,3 +66,32 @@ data ManifestEntry = ManifestEntry
 
 instance ToJSON   ManifestEntry
 instance FromJSON ManifestEntry
+
+-- --- New Standardization Types ---
+
+data NameStandard = NameStandard
+  { stdId      :: String
+  , stdPattern :: String
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON   NameStandard
+instance FromJSON NameStandard
+
+data ShapeRule = ShapeRule
+  { ruleId      :: String
+  , shapeTokens :: [String]
+  , tokenMap    :: [(Int, String)]
+  , targetStd   :: String
+  , dictMap     :: M.Map String (M.Map String String)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON   ShapeRule
+instance FromJSON ShapeRule
+
+data NameMapConfig = NameMapConfig
+  { standards  :: [NameStandard]
+  , shapeRules :: [ShapeRule]
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON   NameMapConfig
+instance FromJSON NameMapConfig

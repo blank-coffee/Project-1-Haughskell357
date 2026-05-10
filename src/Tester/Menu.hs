@@ -6,14 +6,16 @@ import Control.Monad (forM_, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, SomeException)
 import Data.Char (isSpace, toLower)
-import Data.List (intercalate)
-import System.FilePath ((</>), takeFileName, takeDirectory)
+import Data.List (intercalate, find, partition)
+import System.FilePath ((</>), takeFileName, takeDirectory, dropExtension, takeExtension)
 import Text.Read (readMaybe)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, renameFile)
+import qualified Data.Map.Strict as M
 
 import Tester.Types
 import Tester.Templates
 import Tester.Presets
+import Tester.NameMap
 import Tester.Scramble (autoVariants, applyVariant, enabledVariants)
 import Tester.Build
 import Tester.TestRegistry  (allTests)
@@ -21,6 +23,7 @@ import Tester.TestRunner
 import Tester.TestScenarios (allScenarios, scenarioName, scenarioDesc)
 import Tester.TestTypes
 
+import Core.Standardize
 import Core.Logger    (withRunLog)
 import Core.Scanner   (listFilesRecursive)
 import Core.Detect    (detectType)
@@ -57,7 +60,6 @@ normalizeExt ""        = ".txt"
 normalizeExt s@('.':_) = s
 normalizeExt s         = '.' : s
 
--- | Safeguards actions that require a built test-root
 withTestRoot :: InputT IO () -> InputT IO ()
 withTestRoot action = do
   exists <- liftIO $ doesDirectoryExist testRoot
@@ -305,13 +307,131 @@ manageVariantsMenu opt = do
 
 runOrganizerMenu :: InputT IO ()
 runOrganizerMenu = do
-  outputStrLn "\n-- Run Organizer --\n  1) Dry-run scan\n  2) Dedupe\n  3) Full Organize\n  0) Back"
+  outputStrLn "\n-- Run Organizer --\n  1) Dry-run scan\n  2) Dedupe\n  3) Full Organize\n  4) Standardize Names\n  0) Back"
   ask "Choice: " >>= \case
     "1" -> withTestRoot (liftIO runDryScan) >> runOrganizerMenu
     "2" -> withTestRoot runDedupeMenu >> runOrganizerMenu
     "3" -> withTestRoot (liftIO runFullOrganize) >> runOrganizerMenu
+    "4" -> withTestRoot standardizeMenu >> runOrganizerMenu
     "0" -> return ()
     _   -> runOrganizerMenu
+
+standardizeMenu :: InputT IO ()
+standardizeMenu = do
+  outputStrLn "\n-- Standardize Names --\n  1) Apply Standardization (Dry Run)\n  2) Apply Standardization\n  3) Interactive Rule Builder\n  0) Back"
+  ask "Choice: " >>= \case
+    "1" -> liftIO (runStandardize True) >> standardizeMenu
+    "2" -> liftIO (runStandardize False) >> standardizeMenu
+    "3" -> ruleBuilderMenu >> standardizeMenu
+    "0" -> return ()
+    _   -> standardizeMenu
+
+ruleBuilderMenu :: InputT IO ()
+ruleBuilderMenu = do
+  files <- liftIO $ withRunLog testRoot $ \h -> listFilesRecursive h testRoot
+  let exts = filter (\f -> takeExtension f /= "") files
+  if null exts then outputStrLn "No files in test-root to build rules from." else do
+    outputStrLn "\n-- Select a file to model --"
+    numbered exts
+    choice <- ask "Choice (0 to Cancel): "
+    case readMaybe choice :: Maybe Int of
+      Just n | n >= 1 && n <= length exts -> do
+        let file = takeFileName (exts !! (n-1))
+            base = dropExtension file
+            tokens = tokenize base
+            shape  = shapeOf tokens
+        outputStrLn $ "\nBase: " ++ base
+        outputStrLn $ "Tokens: " ++ show (zip [1..length tokens] tokens)
+        
+        cfg <- liftIO loadNameMapConfig
+        outputStrLn "\n-- Select Target Standard --"
+        numbered (map stdId (standards cfg))
+        outputStrLn "  0) Create New Standard"
+        stdChoice <- ask "Choice: "
+        targetStdId <- case readMaybe stdChoice :: Maybe Int of
+           Just 0 -> do
+             idName <- ask "Standard Name (e.g., University Assignment): "
+             pat <- ask "Pattern (e.g., {class}-{number}: {type} {counter}): "
+             let newStd = NameStandard idName pat
+             liftIO $ saveNameMapConfig (cfg { standards = standards cfg ++ [newStd] })
+             return idName
+           Just m | m >= 1 && m <= length (standards cfg) -> return (stdId (standards cfg !! (m-1)))
+           _ -> return ""
+
+        when (targetStdId /= "") $ do
+           outputStrLn "\nMap indices to variables (type variable name, 'x' to skip, '!' to abort)"
+           tmap <- mapTokens 1 tokens []
+           when (not (null tmap)) $ do
+             (finalDict, aborted) <- buildDicts targetStdId tmap tokens M.empty
+             when (not aborted) $ do
+                cfg' <- liftIO loadNameMapConfig
+                let existingRules = shapeRules cfg'
+                    -- Partition out any rules that share the identical token shape
+                    (matches, others) = partition (\r -> shapeTokens r == shape) existingRules
+                    -- Fold over all matches to safely combine their inner dictionaries with the newly created one
+                    mergedDict = foldl (M.unionWith M.union) finalDict (map dictMap matches)
+                    newRule = ShapeRule (show shape) shape tmap targetStdId mergedDict
+                liftIO $ saveNameMapConfig (cfg' { shapeRules = others ++ [newRule] })
+                outputStrLn "Rule saved! Ready to standardize."
+      _ -> return ()
+
+mapTokens :: Int -> [Token] -> [(Int, String)] -> InputT IO [(Int, String)]
+mapTokens idx tokens acc
+  | idx > length tokens = return acc
+  | otherwise = do
+      let tok = tokens !! (idx - 1)
+      res <- ask $ "Token " ++ show idx ++ " " ++ show tok ++ " -> var (or x, !): "
+      case res of
+        "!" -> return []
+        "x" -> mapTokens (idx + 1) tokens acc
+        ""  -> mapTokens idx tokens acc
+        var -> mapTokens (idx + 1) tokens (acc ++ [(idx, var)])
+
+buildDicts :: String -> [(Int, String)] -> [Token] -> M.Map String (M.Map String String) -> InputT IO (M.Map String (M.Map String String), Bool)
+buildDicts _ [] _ acc = return (acc, False)
+buildDicts stdId ((idx, var):ts) tokens acc = do
+  let tok = tokens !! (idx - 1)
+      raw = case tok of Alpha a -> a; Num n -> show n
+  res <- ask $ "Translate raw '" ++ raw ++ "' for {" ++ var ++ "}? (Enter to keep, ! to abort, or type trans): "
+  case res of
+    "!" -> return (acc, True)
+    ""  -> buildDicts stdId ts tokens acc
+    trans -> do
+      let existingVarMap = M.findWithDefault M.empty var acc
+          newVarMap = M.insert raw trans existingVarMap
+          newAcc = M.insert var newVarMap acc
+      buildDicts stdId ts tokens newAcc
+
+runStandardize :: Bool -> IO ()
+runStandardize isDryRun = withRunLog testRoot $ \h -> do
+  files <- listFilesRecursive h testRoot
+  cfg <- loadNameMapConfig
+  putStrLn $ "\nStandardizing " ++ show (length files) ++ " file(s)..."
+  forM_ files $ \fp -> do
+    let base = dropExtension (takeFileName fp)
+        ext  = takeExtension fp
+        dir  = takeDirectory fp
+        tokens = tokenize base
+        shape  = shapeOf tokens
+    case find (\r -> shapeTokens r == shape) (shapeRules cfg) of
+      Nothing -> return () 
+      Just rule -> do
+        case find (\s -> stdId s == targetStd rule) (standards cfg) of
+          Nothing -> return ()
+          Just std -> do
+            let extracted = extractTokens (M.fromList $ tokenMap rule) (dictMap rule) tokens
+                rawBase   = applyStandard (stdPattern std) extracted
+                newBase   = sanitizeFileName rawBase
+                newFp     = dir </> (newBase ++ ext)
+            when (newFp /= fp) $ do
+              exists <- doesFileExist newFp
+              if exists
+                then putStrLn $ "[skip] " ++ fp ++ " -> " ++ newFp ++ " (already exists)"
+                else if isDryRun
+                  then putStrLn $ "[dry-run] " ++ fp ++ " -> " ++ newFp
+                  else do
+                    renameFile fp newFp
+                    putStrLn $ "[moved] " ++ fp ++ " -> " ++ newFp
 
 runFullOrganize :: IO ()
 runFullOrganize = withRunLog testRoot $ \h -> do
@@ -374,4 +494,3 @@ printOutcomes outcomes = do
   outputStrLn (replicate 60 '-')
   let (p, f, t) = (passCount outcomes, failCount outcomes, length outcomes)
   outputStrLn $ "  Passed: " ++ show p ++ " / " ++ show t ++ (if f > 0 then " (" ++ show f ++ " failed)" else " ✓")
-  
