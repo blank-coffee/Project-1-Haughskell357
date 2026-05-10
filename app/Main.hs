@@ -1,12 +1,13 @@
 module Main where
 
 import System.Environment (getArgs)
-import System.IO (hFlush, stdout, hIsTerminalDevice, stdin)
+import System.IO (Handle, hFlush, stdout, hIsTerminalDevice, stdin)
 import Data.List (isPrefixOf)
 import Control.Monad (unless, when)
 import System.FilePath (makeRelative)
 import System.Exit (exitFailure)
 
+import Core.Logger (withRunLog)
 import Core.Scanner (listFilesRecursive)
 import Core.Organizer
   ( OrganizeOptions(..)
@@ -47,7 +48,7 @@ main = do
     exitFailure
 
   if scanMode
-    then runScan opts root
+    then withRunLog root $ \h -> runScan opts root h
     else if undoMode
       then do
         putStrLn "[progress] undoing 1/1"
@@ -59,12 +60,12 @@ main = do
           cleanupBackup root
           putStrLn "Backup removed."
         else
-          runNormal opts noPrompt root
+          withRunLog root $ \h -> runNormal opts noPrompt root h
 
-runScan :: OrganizeOptions -> FilePath -> IO ()
-runScan opts root = do
+runScan :: OrganizeOptions -> FilePath -> Handle -> IO ()
+runScan opts root h = do
   putStrLn $ "-- scanning " ++ root ++ "..."
-  files <- listFilesRecursive root
+  files <- listFilesRecursive h root
   let total = length files
   mapM_ (\(i, fp) -> printScanInfo opts root i total fp) (zip [1..] files)
   putStrLn "-- scan complete."
@@ -80,8 +81,8 @@ printScanInfo opts root i total fp = do
     else pure ()
   putStrLn rel
 
-runNormal :: OrganizeOptions -> Bool -> FilePath -> IO ()
-runNormal opts noPrompt root = do
+runNormal :: OrganizeOptions -> Bool -> FilePath -> Handle -> IO ()
+runNormal opts noPrompt root h = do
   putStrLn $
     "Organizing files in: " ++ root
     ++ (if optDryRun opts then " (dry run)" else "")
@@ -89,8 +90,8 @@ runNormal opts noPrompt root = do
   unless (optDryRun opts) $
     createBackup root
 
-  files <- listFilesRecursive root
-  organizeByTypeWith opts root files
+  files <- listFilesRecursive h root
+  organizeByTypeWith opts root h files
 
   putStrLn "Sorting complete."
 

@@ -7,8 +7,10 @@ module Core.Organizer
 
 import Core.Detect (detectType)
 import Core.Dedupe (renameOrCopy, uniqueDest)
+import Core.Logger (logMove, logSkip)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeFileName, makeRelative)
+import System.IO (Handle)
 import Control.Exception (try, SomeException)
 import Data.List (isPrefixOf)
 import Control.Monad (when)
@@ -18,17 +20,17 @@ data OrganizeOptions = OrganizeOptions
   , optVerbose :: Bool
   }
 
-organizeByType :: FilePath -> [FilePath] -> IO ()
-organizeByType root files = do
+organizeByType :: FilePath -> Handle -> [FilePath] -> IO ()
+organizeByType root h files = do
   createDirectoryIfMissing True (root <> "/text")
   createDirectoryIfMissing True (root <> "/images")
   createDirectoryIfMissing True (root <> "/other")
-  mapM_ (moveFile root) files
+  mapM_ (moveFile root h) files
 
-organizeByTypeWith :: OrganizeOptions -> FilePath -> [FilePath] -> IO ()
-organizeByTypeWith opts root files =
+organizeByTypeWith :: OrganizeOptions -> FilePath -> Handle -> [FilePath] -> IO ()
+organizeByTypeWith opts root h files =
   if optDryRun opts
-    then organizeByTypeDryRun root files
+    then organizeByTypeDryRun root h files
     else do
       createDirectoryIfMissing True (root <> "/text")
       createDirectoryIfMissing True (root <> "/images")
@@ -37,10 +39,10 @@ organizeByTypeWith opts root files =
       let ignored = ["backup", ".backup", "_backup"]
           files'  = filter (\p -> takeFileName p `notElem` ignored) files
           total   = length files'
-      mapM_ (\(i, fp) -> moveFileWith opts root total i fp) (zip [1..] files')
+      mapM_ (\(i, fp) -> moveFileWith opts root h total i fp) (zip [1..] files')
 
-organizeByTypeDryRun :: FilePath -> [FilePath] -> IO ()
-organizeByTypeDryRun root files = do
+organizeByTypeDryRun :: FilePath -> Handle -> [FilePath] -> IO ()
+organizeByTypeDryRun root h files = do
   createDirectoryIfMissing True (root <> "/text")
   createDirectoryIfMissing True (root <> "/images")
   createDirectoryIfMissing True (root <> "/other")
@@ -48,28 +50,32 @@ organizeByTypeDryRun root files = do
   let ignored = ["backup", ".backup", "_backup"]
       files'  = filter (\p -> takeFileName p `notElem` ignored) files
       total   = length files'
-  mapM_ (\(i, fp) -> planMove root total i fp) (zip [1..] files')
+  mapM_ (\(i, fp) -> planMove root h total i fp) (zip [1..] files')
 
-moveFile :: FilePath -> FilePath -> IO ()
-moveFile root src = do
+moveFile :: FilePath -> Handle -> FilePath -> IO ()
+moveFile root h src = do
   result <- try (detectType src) :: IO (Either SomeException String)
   case result of
-    Left e     -> putStrLn $ "Skipped " ++ src ++ ": " ++ show e
+    Left e     -> do
+      putStrLn $ "Skipped " ++ src ++ ": " ++ show e
+      logSkip h src (show e)
     Right mime -> do
       let subdir  = mimeToDir mime
           destDir = root <> "/" <> subdir
       dest <- uniqueDest destDir (takeFileName src)
       _ <- renameOrCopy src dest
       putStrLn $ src ++ " -> " ++ dest
+      logMove h src dest
 
-moveFileWith :: OrganizeOptions -> FilePath -> Int -> Int -> FilePath -> IO ()
-moveFileWith opts root total i src = do
+moveFileWith :: OrganizeOptions -> FilePath -> Handle -> Int -> Int -> FilePath -> IO ()
+moveFileWith opts root h total i src = do
   result <- try (detectType src) :: IO (Either SomeException String)
   let rel = makeRelative root src
   putStrLn $ "[progress] moving " ++ show i ++ "/" ++ show total
   case result of
-    Left e ->
+    Left e -> do
       putStrLn $ "Skipped " ++ rel ++ ": " ++ show e
+      logSkip h src (show e)
 
     Right mime -> do
       let subdir  = mimeToDir mime
@@ -88,15 +94,17 @@ moveFileWith opts root total i src = do
             putStrLn $ "[verbose] moving to " ++ makeRelative root dest
           _ <- renameOrCopy src dest
           putStrLn $ rel ++ " -> " ++ makeRelative root dest
+          logMove h src dest
 
-planMove :: FilePath -> Int -> Int -> FilePath -> IO ()
-planMove root total i src = do
+planMove :: FilePath -> Handle -> Int -> Int -> FilePath -> IO ()
+planMove root h total i src = do
   result <- try (detectType src) :: IO (Either SomeException String)
   let rel = makeRelative root src
   putStrLn $ "[progress] planning " ++ show i ++ "/" ++ show total
   case result of
-    Left e ->
+    Left e -> do
       putStrLn $ "[dry-run] Skipped " ++ rel ++ ": " ++ show e
+      logSkip h src (show e)
 
     Right mime -> do
       let subdir  = mimeToDir mime
@@ -110,4 +118,3 @@ mimeToDir mime
   | "text/"  `isPrefixOf` mime = "text"
   | "image/" `isPrefixOf` mime = "images"
   | otherwise                  = "other"
-
