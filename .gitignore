@@ -70,6 +70,12 @@ scripts/dedupe.sh
 .claude/
 .claude
 
+# --- Data and Configuration Artifacts ---
+/data/presets/*.json
+!/data/presets/scenarios/
+/data/maps/*.json
+!/data/maps/static/
+
 # --- Deprecated Group Artifacts ---
 test-data/
 /test-data/

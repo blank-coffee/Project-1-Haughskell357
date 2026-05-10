@@ -9,7 +9,7 @@ import System.FilePath ((</>), takeDirectory)
 import Tester.Types
 
 configPath :: FilePath
-configPath = "presets" </> "namemaps.json"
+configPath = "data" </> "maps" </> "namemaps.json"
 
 emptyConfig :: NameMapConfig
 emptyConfig = NameMapConfig [] []
@@ -25,5 +25,7 @@ loadNameMapConfig = do
 
 saveNameMapConfig :: NameMapConfig -> IO ()
 saveNameMapConfig cfg = do
+  -- Ensure both the static folder and the maps base folder exist
+  createDirectoryIfMissing True ("data" </> "maps" </> "static")
   createDirectoryIfMissing True (takeDirectory configPath)
   encodeFile configPath cfg

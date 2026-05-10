@@ -13,7 +13,10 @@ import System.FilePath ((</>), takeExtension)
 import Tester.Types
 
 presetsDir :: FilePath
-presetsDir = "presets"
+presetsDir = "data" </> "presets"
+
+-- (The rest of the file remains exactly the same, as `listPresets` 
+-- correctly uses `presetsDir </> "scenarios"` dynamically)
 
 loadPreset :: FilePath -> IO (Either String Preset)
 loadPreset path = doesFileExist path >>= \ex -> if not ex then return (Left $ "File not found: " ++ path) else eitherDecodeFileStrict path
