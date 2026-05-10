@@ -8,12 +8,11 @@ import System.Directory
   , readable
   , Permissions
   )
-import System.FilePath ((</>))
-import Control.Monad (filterM, forM)
+import System.FilePath ((</>), takeFileName)
+import Control.Monad (filterM)
 import qualified Data.Set as Set
 import Control.Exception (try, SomeException)
 
--- Public API: list all regular files under a directory (non-following symlink loops)
 listFilesRecursive :: FilePath -> IO [FilePath]
 listFilesRecursive root = go Set.empty [root]
   where
@@ -24,11 +23,17 @@ listFilesRecursive root = go Set.empty [root]
         Left _ -> go seen ds
         Right names -> do
           let paths = map (d </>) names
+
           files <- filterM doesFileExist paths
           dirs  <- filterM doesDirectoryExist paths
-          readableDirs <- filterM isReadable dirs
+
+          let ignored = ["backup", ".backup", "_backup"]
+              dirs'   = filter (\p -> takeFileName p `notElem` ignored) dirs
+
+          readableDirs <- filterM isReadable dirs'
           let newDirs = filter (\p -> not (Set.member p seen)) readableDirs
-              seen' = foldr Set.insert seen newDirs
+              seen'   = foldr Set.insert seen newDirs
+
           rest <- go seen' (newDirs ++ ds)
           return (files ++ rest)
 
@@ -36,5 +41,5 @@ isReadable :: FilePath -> IO Bool
 isReadable p = do
   eres <- try (getPermissions p) :: IO (Either SomeException Permissions)
   case eres of
-    Left _    -> return False
+    Left _      -> return False
     Right perms -> return (readable perms)
