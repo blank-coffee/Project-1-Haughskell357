@@ -8,7 +8,7 @@ import System.Directory
   , readable
   , Permissions
   )
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeFileName)
 import System.IO (Handle)
 import Control.Monad (filterM)
 import qualified Data.Set as Set
@@ -27,14 +27,19 @@ listFilesRecursive h root = go Set.empty [root]
           logDirSkip h d (show e)
           go seen ds
         Right names -> do
-          let paths = map (d </>) names
-          files        <- filterM doesFileExist paths
-          dirs         <- filterM doesDirectoryExist paths
-          readableDirs <- filterM isReadable dirs
-          let skipped = filter (`notElem` readableDirs) dirs
+          let paths   = map (d </>) names
+              ignored = ["backup", ".backup", "_backup"]
+
+          files <- filterM doesFileExist paths
+          dirs  <- filterM doesDirectoryExist paths
+
+          let dirs'        = filter (\p -> takeFileName p `notElem` ignored) dirs
+          readableDirs    <- filterM isReadable dirs'
+          let skipped      = filter (`notElem` readableDirs) dirs'
           mapM_ (\p -> logDirSkip h p "not readable") skipped
           let newDirs = filter (\p -> not (Set.member p seen)) readableDirs
               seen'   = foldr Set.insert seen newDirs
+
           rest <- go seen' (newDirs ++ ds)
           return (files ++ rest)
 
