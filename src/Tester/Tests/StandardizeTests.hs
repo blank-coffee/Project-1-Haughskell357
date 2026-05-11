@@ -6,7 +6,6 @@ import qualified Data.Map.Strict as M
 
 import Tester.TestTypes
 import Tester.Types
--- Notice we ONLY import StandardizeRunner here, NOT Menu
 import Tester.StandardizeRunner (runStandardizeBatch)
 import Core.Logger (withRunLog)
 

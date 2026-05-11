@@ -23,29 +23,33 @@ data OrganizeOptions = OrganizeOptions
   , optCustomRules :: [CustomRule]
   }
 
--- | Simple organizer: MIME-based only, no options. Used by tests.
-organizeByType :: FilePath -> Handle -> [FilePath] -> IO ()
-organizeByType root h files = do
+ignoredNames :: [String]
+ignoredNames = ["backup", ".backup", "_backup"]
+
+ensureDirs :: FilePath -> IO ()
+ensureDirs root = do
   createDirectoryIfMissing True (root <> "/text")
   createDirectoryIfMissing True (root <> "/images")
   createDirectoryIfMissing True (root <> "/other")
-  mapM_ (moveFile root h) files
+
+-- | Simple organizer: MIME-based only, no options. Used by tests.
+organizeByType :: FilePath -> Handle -> [FilePath] -> IO ()
+organizeByType root h files = do
+  ensureDirs root
+  mapM_ (processFile (OrganizeOptions False False []) root h Nothing) files
 
 -- | Full organizer: respects options including custom sort rules.
 organizeByTypeWith :: OrganizeOptions -> FilePath -> Handle -> [FilePath] -> IO ()
 organizeByTypeWith opts root h files = do
-  createDirectoryIfMissing True (root <> "/text")
-  createDirectoryIfMissing True (root <> "/images")
-  createDirectoryIfMissing True (root <> "/other")
-  let ignored = ["backup", ".backup", "_backup"]
-      files'  = filter (\p -> takeFileName p `notElem` ignored) files
-      total   = length files'
-  mapM_ (\(i, fp) -> moveFileWith opts root h total i fp) (zip [1..] files')
+  ensureDirs root
+  let files' = filter (\p -> takeFileName p `notElem` ignoredNames) files
+      total  = length files'
+  mapM_ (\(i, fp) -> processFile opts root h (Just (i, total)) fp) (zip [1..] files')
 
 -- | Dry-run wrapper: shows what would happen without moving anything.
 organizeByTypeDryRun :: FilePath -> Handle -> [FilePath] -> IO ()
 organizeByTypeDryRun root h files =
-  organizeByTypeWith (OrganizeOptions True False []) root h files
+  organizeByTypeWith (OrganizeOptions True True []) root h files
 
 -- ─── Internal ───────────────────────────────────────────────────────────────
 
@@ -56,30 +60,18 @@ applyRules rules fname =
     (r:_) -> Just (ruleFolder r)
     []    -> Nothing
 
-moveFile :: FilePath -> Handle -> FilePath -> IO ()
-moveFile root h src = do
-  result <- try (detectType src) :: IO (Either SomeException String)
-  case result of
-    Left e     -> do
-      putStrLn $ "Skipped " ++ src ++ ": " ++ show e
-      logSkip h src (show e)
-    Right mime -> do
-      let subdir  = mimeToDir mime
-          destDir = root <> "/" <> subdir
-      dest <- uniqueDest destDir (takeFileName src)
-      _ <- renameOrCopy src dest
-      putStrLn $ src ++ " -> " ++ dest
-      logMove h src dest
-
-moveFileWith :: OrganizeOptions -> FilePath -> Handle -> Int -> Int -> FilePath -> IO ()
-moveFileWith opts root h total i src = do
-  result <- try (detectType src) :: IO (Either SomeException String)
+processFile :: OrganizeOptions -> FilePath -> Handle -> Maybe (Int, Int) -> FilePath -> IO ()
+processFile opts root h mProgress src = do
   let rel   = makeRelative root src
       fname = takeFileName src
-  putStrLn $ "[progress] moving " ++ show i ++ "/" ++ show total
+  case mProgress of
+    Just (i, total) -> putStrLn $ "[progress] " ++ (if optDryRun opts then "planning " else "moving ") ++ show i ++ "/" ++ show total
+    Nothing         -> return ()
+
+  result <- try (detectType src) :: IO (Either SomeException String)
   case result of
     Left e -> do
-      putStrLn $ "Skipped " ++ rel ++ ": " ++ show e
+      putStrLn $ (if optDryRun opts then "[dry-run] " else "") ++ "Skipped " ++ rel ++ ": " ++ show e
       logSkip h src (show e)
     Right mime -> do
       let subdir  = case applyRules (optCustomRules opts) fname of
@@ -88,14 +80,15 @@ moveFileWith opts root h total i src = do
           destDir = root <> "/" <> subdir
       createDirectoryIfMissing True destDir
       dest <- uniqueDest destDir fname
-      when (optVerbose opts && not (optDryRun opts)) $
-        putStrLn $ "[verbose] " ++ rel ++ " classified as " ++ mime
+
+      when (optVerbose opts) $
+        putStrLn $ (if optDryRun opts then "[dry-run] " else "[verbose] ") ++ rel ++ " classified as " ++ mime
+
       if optDryRun opts
-        then do
-          putStrLn $ "[dry-run] classify " ++ rel ++ " as " ++ mime
-          putStrLn $ "[dry-run] " ++ rel ++ " -> " ++ makeRelative root dest
+        then putStrLn $ "[dry-run] " ++ rel ++ " -> " ++ makeRelative root dest
         else do
-          when (optVerbose opts) $
+          let isNoProgress = case mProgress of { Nothing -> True; _ -> False }
+          when (optVerbose opts && not isNoProgress) $
             putStrLn $ "[verbose] moving to " ++ makeRelative root dest
           _ <- renameOrCopy src dest
           putStrLn $ rel ++ " -> " ++ makeRelative root dest

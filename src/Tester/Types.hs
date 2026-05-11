@@ -67,10 +67,6 @@ data ManifestEntry = ManifestEntry
 instance ToJSON   ManifestEntry
 instance FromJSON ManifestEntry
 
--- ─── Standardization Types ───────────────────────────────────────────────────
-
--- | A naming standard: a unique human-readable ID and a pattern string such
---   as "{class}-{number}: {type} {counter}".
 data NameStandard = NameStandard
   { stdId      :: String
   , stdPattern :: String
@@ -79,23 +75,6 @@ data NameStandard = NameStandard
 instance ToJSON   NameStandard
 instance FromJSON NameStandard
 
--- | A rule that maps a particular token shape (and optionally a dominant
---   delimiter character) to a naming standard.
---
---   'ruleName'    — user-supplied unique key; used for upserts and display.
---   'shapeTokens' — ordered list of "Alpha" / "Num" strings describing the
---                   token shape; the primary matching criterion.
---   'ruleDelim'   — dominant non-alphanumeric character detected from the
---                   file used to build the rule (e.g. Just '-' for dash-
---                   separated names).  Nothing means the rule matches any
---                   delimiter style.  When multiple rules share the same
---                   shape, the one whose delimiter matches the file under
---                   inspection is preferred.
---   'tokenMap'    — list of (1-based token index, variable name) pairs that
---                   describe how token positions map to pattern variables.
---   'targetStd'   — stdId of the NameStandard to apply.
---   'dictMap'     — per-variable translation tables:
---                   variable name -> (raw token value -> translated value).
 data ShapeRule = ShapeRule
   { ruleName    :: String
   , shapeTokens :: [String]

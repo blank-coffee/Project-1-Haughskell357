@@ -43,9 +43,9 @@ extractPatternVars ('{':rest) =
 extractPatternVars (_:rest) = extractPatternVars rest
 
 extractTokens 
-  :: M.Map Int String                    -- tMap
-  -> M.Map String (M.Map String String)  -- dMap (Local Rule)
-  -> M.Map String (M.Map String String)  -- globalDict
+  :: M.Map Int String
+  -> M.Map String (M.Map String String)
+  -> M.Map String (M.Map String String)
   -> [Token] 
   -> M.Map String String
 extractTokens tMap dMap globalDict tokens =
@@ -61,16 +61,12 @@ extractTokens tMap dMap globalDict tokens =
                 hasGlobal   = M.member normVal globalDictV
                 
                 isAnchored  = any (\v -> '@' `elem` take 2 v) (M.elems localDict)
-                -- It is a "miss" if the rule has local knowledge for this variable, 
-                -- but the current token isn't in it (and isn't in global).
                 isMiss      = not (M.null localDict) && not hasLocal && not hasGlobal
                 
             return (varName, normVal, origVal, localDict, globalDictV, isAnchored, isMiss)
       
-      -- If any token misses on an anchored variable, the rule hard-fails.
       hasAnchorFail = any (\(_, _, _, _, _, isAnchored, isMiss) -> isAnchored && isMiss) tokenEvals
       
-      -- If any token misses (but isn't anchored), trigger Sibling Mode.
       isSiblingMode = any (\(_, _, _, _, _, _, isMiss) -> isMiss) tokenEvals
 
   in if hasAnchorFail 
@@ -80,12 +76,12 @@ extractTokens tMap dMap globalDict tokens =
        let globalTrans = M.lookup normVal globalDictV
        
        if isSiblingMode
-       then -- SIBLING MODE: Ignore all local translations. Only use globals or pass-through.
+       then
          case globalTrans of
            Just gt -> return (varName, stripDecorations gt)
            Nothing -> return (varName, origVal)
            
-       else -- STRICT MODE: Perfect match. Apply local translations, then global, then pass-through.
+       else
          let localTrans = M.lookup normVal localDict
          in case localTrans of
               Just t  -> return (varName, stripDecorations t)

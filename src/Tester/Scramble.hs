@@ -9,7 +9,6 @@ import Data.Char (toLower, toUpper)
 import System.Random (randomRIO)
 import Tester.Types
 
--- | Build the 12 auto variants (3 cases × 4 separators) for a base name.
 autoVariants :: String -> [Variant]
 autoVariants base =
   [ Variant (cLabel ++ " + " ++ sLabel) cBase (cBase ++ sep ++ "{N}") True
