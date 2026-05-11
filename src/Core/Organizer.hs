@@ -10,7 +10,7 @@ import Core.Detect (detectType)
 import Core.Dedupe (renameOrCopy, uniqueDest)
 import Core.Logger (logMove, logSkip)
 import System.Directory (createDirectoryIfMissing)
-import System.FilePath (takeFileName, makeRelative)
+import System.FilePath ((</>), takeFileName, makeRelative, takeDirectory, equalFilePath)
 import System.IO (Handle)
 import Control.Exception (try, SomeException)
 import Data.Char (toLower)
@@ -42,8 +42,12 @@ organizeByType root h files = do
 organizeByTypeWith :: OrganizeOptions -> FilePath -> Handle -> [FilePath] -> IO ()
 organizeByTypeWith opts root h files = do
   ensureDirs root
-  let files' = filter (\p -> takeFileName p `notElem` ignoredNames) files
-      total  = length files'
+  let customFolders   = map ruleFolder (optCustomRules opts)
+      outputDirs      = map (root </>) (["text", "images", "other", "deleteme"] ++ customFolders)
+      alreadySorted p = any (equalFilePath (takeDirectory p)) outputDirs
+      files'          = filter (\p -> takeFileName p `notElem` ignoredNames
+                                   && not (alreadySorted p)) files
+      total           = length files'
   mapM_ (\(i, fp) -> processFile opts root h (Just (i, total)) fp) (zip [1..] files')
 
 -- | Dry-run wrapper: shows what would happen without moving anything.

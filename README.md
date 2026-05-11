@@ -308,6 +308,11 @@ The system now supports:
 - Accurate progress parsing  
 - Fully functional GUI + CLI modes  
 - Developer‑safe workflows  
+- Dry-run, verbose, scan, undo, and cleanup flags  
+- SHA-256 deduplication with `deleteme/` quarantine  
+- Timestamped run logging (MOVED, SKIPPED, DIR-SKIP, DUPE-KEPT, DUPE-MOVED, STANDARDIZED)  
+- Custom folder sorting by keyword with saved presets  
+- File name standardization via token-based rule builder  
 
 
 
