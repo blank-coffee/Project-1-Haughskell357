@@ -14,12 +14,9 @@ import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
 import Tester.Types
 
--- Replace the top path definitions:
 optionsFile, staticOptionsFile :: FilePath
 optionsFile       = "data" </> "presets" </> "options.json"
 staticOptionsFile = "data" </> "presets" </> "scenarios" </> "options.json"
-
--- (The rest of the file remains exactly the same)
 
 loadOptions :: IO [FileOption]
 loadOptions = do

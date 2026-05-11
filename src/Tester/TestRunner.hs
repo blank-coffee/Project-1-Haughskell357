@@ -1,5 +1,3 @@
--- | Runs TestSpecs against their declared scenarios and collects outcomes.
-
 module Tester.TestRunner
   ( TestOutcome(..)
   , runAllTests

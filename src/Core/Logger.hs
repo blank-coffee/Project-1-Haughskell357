@@ -28,8 +28,6 @@ withRunLog root action = do
   hClose h
   pure result
 
--- Tags are padded to 12 characters so log files align neatly in a viewer.
-
 logMove :: Handle -> FilePath -> FilePath -> IO ()
 logMove h src dest = hPutStrLn h $ "MOVED        " ++ src ++ " -> " ++ dest
 
@@ -48,7 +46,5 @@ logDupeMoved h src dest = hPutStrLn h $ "DUPE-MOVED   " ++ src ++ " -> " ++ dest
 logStandardize :: Handle -> FilePath -> FilePath -> IO ()
 logStandardize h src dest = hPutStrLn h $ "STANDARDIZED " ++ src ++ " -> " ++ dest
 
--- | Logged when a file matched a rule but the rename was skipped for a
---   recoverable reason (unresolved variables, target already exists, etc.).
 logStdSkip :: Handle -> FilePath -> String -> IO ()
 logStdSkip h src reason = hPutStrLn h $ "STD-SKIP     " ++ src ++ ": " ++ reason

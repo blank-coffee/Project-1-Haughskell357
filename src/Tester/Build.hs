@@ -6,14 +6,7 @@ module Tester.Build
   , fullReset
   ) where
 
-import System.Directory
-  ( createDirectoryIfMissing
-  , removePathForcibly
-  , doesFileExist
-  , doesDirectoryExist
-  , listDirectory
-  , renameFile
-  )
+import System.Directory (createDirectoryIfMissing, removePathForcibly, doesFileExist, doesDirectoryExist, listDirectory, renameFile)
 import System.FilePath ((</>), takeDirectory, takeFileName, takeExtension)
 import Control.Monad (forM, forM_, when, void)
 import Data.List (find)
@@ -31,8 +24,6 @@ testRoot = "test-root"
 manifestPath :: FilePath
 manifestPath = "tester-manifest.json"
 
--- ─── OS Explorer Hooks ──────────────────────────────────────────────────────
-
 openExplorer :: IO ()
 openExplorer = do
   let script | os == "mingw32" = "explorer.exe \"test-root\""
@@ -44,25 +35,18 @@ closeExplorer :: IO ()
 closeExplorer = do
   let script | os == "mingw32" = "powershell -Command \"(New-Object -comObject Shell.Application).Windows() | ? { $_.LocationName -eq 'test-root' } | % { $_.Quit() }\""
              | otherwise       = "wmctrl -c \"test-root\""
-  -- Use callCommand to wait for the process to finish before continuing
   void $ (try (callCommand script) :: IO (Either SomeException ()))
-
--- ─── Build ──────────────────────────────────────────────────────────────────
 
 buildPreset :: [FileOption] -> Preset -> IO ()
 buildPreset options preset = do
   clearTestRoot
   createDirectoryIfMissing True testRoot
   entries <- fmap concat $ forM (presetStructure preset) $ \folder -> do
-    let dir = if folderPath folder == "."
-              then testRoot
-              else testRoot </> folderPath folder
+    let dir = if folderPath folder == "." then testRoot else testRoot </> folderPath folder
     createDirectoryIfMissing True dir
     fmap concat $ forM (folderFiles folder) $ \entry ->
       case find (\o -> optionName o == entryOption entry) options of
-        Nothing -> do
-          putStrLn $ "  Warning: no file option '" ++ entryOption entry ++ "' -- skipping."
-          return []
+        Nothing -> putStrLn ("  Warning: no file option '" ++ entryOption entry ++ "' -- skipping.") >> return []
         Just opt -> do
           let base = optionName opt
               ext  = optionExt  opt
@@ -83,8 +67,6 @@ buildPreset options preset = do
   putStrLn $ "\nBuilt " ++ show (length entries) ++ " file(s). Manifest saved."
   openExplorer
 
--- ─── Vary ───────────────────────────────────────────────────────────────────
-
 varyTestRoot :: [FileOption] -> IO ()
 varyTestRoot options = do
   exists <- doesFileExist manifestPath
@@ -97,15 +79,11 @@ varyTestRoot options = do
         Right entries -> do
           updated <- forM entries $ \me ->
             case find (\o -> optionName o == mOptionName me) options of
-              Nothing -> do
-                putStrLn $ "  Skipping — option '" ++ mOptionName me ++ "' not found."
-                return me
+              Nothing -> putStrLn ("  Skipping — option '" ++ mOptionName me ++ "' not found.") >> return me
               Just opt ->
                 let vs = variants opt in
                 if null (enabledVariants vs)
-                  then do
-                    putStrLn $ "  Skipping '" ++ takeFileName (mCurrentPath me) ++ "' — no enabled variants."
-                    return me
+                  then putStrLn ("  Skipping '" ++ takeFileName (mCurrentPath me) ++ "' — no enabled variants.") >> return me
                   else do
                     v <- pickVariant vs
                     let newName = applyVariant (optionExt opt) v (mIndex me)
@@ -114,15 +92,11 @@ varyTestRoot options = do
                     when (oldPath /= newPath) $ do
                       fileEx <- doesFileExist oldPath
                       if fileEx
-                        then do
-                          renameFile oldPath newPath
-                          putStrLn $ "  varied: " ++ takeFileName oldPath ++ "  ->  " ++ newName
+                        then renameFile oldPath newPath >> putStrLn ("  varied: " ++ takeFileName oldPath ++ "  ->  " ++ newName)
                         else putStrLn $ "  Warning: file not found: " ++ oldPath
                     return me { mCurrentPath = newPath }
           encodeFile manifestPath updated
           putStrLn "\nVariation complete. Manifest updated."
-
--- ─── Reset helpers ──────────────────────────────────────────────────────────
 
 clearTestRoot :: IO ()
 clearTestRoot = do
@@ -131,15 +105,12 @@ clearTestRoot = do
   removePathForcibly manifestPath
   putStrLn $ "Cleared " ++ testRoot ++ "/"
 
--- In your fullReset function, replace the `presetsExists` block with:
-
 fullReset :: IO ()
 fullReset = do
   closeExplorer
   removePathForcibly testRoot
   removePathForcibly manifestPath
   
-  -- Helper to wipe JSON files in a specific directory
   let wipeUserFiles dir = do
         exists <- doesDirectoryExist dir
         when exists $ do

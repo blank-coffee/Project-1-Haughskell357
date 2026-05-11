@@ -16,7 +16,6 @@ library
       Core.Scanner
     , Core.Detect
     , Core.Hash
-    , Core.Duplicate
     , Core.Dedupe
     , Core.Organizer
     , Core.Backup
@@ -30,7 +29,6 @@ library
     , Tester.Build
     , Tester.Menu
     , Tester.StandardizeRunner
-    -- Test integration
     , Tester.TestTypes
     , Tester.TestScenarios
     , Tester.TestRegistry
