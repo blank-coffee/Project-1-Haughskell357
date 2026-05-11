@@ -17,7 +17,7 @@ import Tester.Types
 import Tester.Templates
 import Tester.Presets
 import Tester.NameMap
-import Tester.Scramble (autoVariants, applyVariant, enabledVariants)
+import Tester.Scramble (autoVariants)
 import Tester.Build
 import Tester.TestRegistry  (allTests)
 import Tester.TestRunner
@@ -507,7 +507,6 @@ standardizeFile h isDryRun cfg fp = do
         r <- shapeRules cfg
         (var, dict) <- M.toList (dictMap r)
         let globalPairs = [ (k, v) | (k, v) <- M.toList dict, '*' `elem` take 2 v ]
-            -- Automatically map the lowercase result string back to the result string (e.g. "assignment" -> "Assignment")
             autoPairs   = [ (map toLower (stripDec tgt), stripDec tgt) | (_, tgt) <- globalPairs ]
         return (var, M.fromList (globalPairs ++ autoPairs))
 
@@ -526,23 +525,29 @@ standardizeFile h isDryRun cfg fp = do
             if hasUnresolved rawBase
               then tryRules rest (Just $ "unresolved variables -> " ++ rawBase)
               else do
-                let newBase = sanitizeFileName rawBase
-                    newFp   = dir </> (newBase ++ ext)
+                let baseDest = sanitizeFileName rawBase
+                
+                -- Recursive loop to find an available Windows-style filename
+                let findUnique n = do
+                      let suffix = if n == 0 then "" else " (" ++ show n ++ ")"
+                          testName = baseDest ++ suffix
+                          testFp   = dir </> (testName ++ ext)
+                      exists <- doesFileExist testFp
+                      let isCaseChangeOnly = map toLower testFp == map toLower fp
+                      if exists && not isCaseChangeOnly
+                        then findUnique (n + 1)
+                        else return (testName, testFp)
+
+                (finalBase, newFp) <- findUnique 0
+
                 if newFp == fp
                   then return ()
-                  else do
-                    exists <- doesFileExist newFp
-                    if exists
-                      then do
-                        let err = "target exists: " ++ newBase ++ ext
-                        putStrLn $ "[std-skip] " ++ base ++ ext ++ " -> " ++ err
-                        logStdSkip h fp err
-                      else if isDryRun
-                        then putStrLn $ "[dry-run]  " ++ base ++ ext ++ " -> " ++ newBase ++ ext
-                        else do
-                          renameFile fp newFp
-                          putStrLn $ "[std]      " ++ base ++ ext ++ " -> " ++ newBase ++ ext
-                          logStandardize h fp newFp
+                  else if isDryRun
+                    then putStrLn $ "[dry-run]  " ++ base ++ ext ++ " -> " ++ finalBase ++ ext
+                    else do
+                      renameFile fp newFp
+                      putStrLn $ "[std]      " ++ base ++ ext ++ " -> " ++ finalBase ++ ext
+                      logStandardize h fp newFp
 
   tryRules rules Nothing
 
