@@ -39,11 +39,11 @@ LABEL = ("Courier New", 10)
 
 current_theme = THEMES["dark"]
 tester_process = None
-gui_process = None  # GUI-side file-organizer subprocess
+gui_process = None  
 current_input = ""
 command_history = []
 history_index = None
-current_view = "logs"  # "logs" or "structure"
+current_view = "logs"  
 
 ANSI_FG_COLORS = {
     "30": "#000000",
@@ -197,6 +197,13 @@ def apply_theme():
     else:
         gui_btn.config(bg=theme["PANEL"], fg=theme["FG"])
         cli_btn.config(bg=theme["ACCENT"], fg=theme["FG"])
+    if theme_var.get() == "dark":
+        dark_btn.config(bg=theme["ACCENT"], fg=theme["FG"])
+        light_btn.config(bg=theme["PANEL"], fg=theme["FG"])
+    else:
+        light_btn.config(bg=theme["ACCENT"], fg=theme["FG"])
+        dark_btn.config(bg=theme["PANEL"], fg=theme["FG"])
+
 
     for child in flag_frame.winfo_children():
         if isinstance(child, tk.Checkbutton):
