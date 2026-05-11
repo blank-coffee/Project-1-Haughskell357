@@ -28,7 +28,8 @@ listFilesRecursive h root = go Set.empty [root]
           go seen ds
         Right names -> do
           let paths   = map (d </>) names
-              ignored = ["backup", ".backup", "_backup", ".file-organizer-logs"]
+              ignored = ["backup", ".backup", "_backup", ".file-organizer-logs"
+                        ,"text", "images", "other", "deleteme"]
 
           files <- filterM doesFileExist paths
           dirs  <- filterM doesDirectoryExist paths
