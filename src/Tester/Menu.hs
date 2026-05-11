@@ -9,7 +9,7 @@ import Data.Char (isSpace, toLower)
 import Data.List (intercalate, find, nub, partition)
 import System.FilePath ((</>), takeFileName, takeDirectory, dropExtension, takeExtension)
 import Text.Read (readMaybe)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, renameFile)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist)
 import System.IO (Handle)
 import qualified Data.Map.Strict as M
 
@@ -23,9 +23,10 @@ import Tester.TestRegistry  (allTests)
 import Tester.TestRunner
 import Tester.TestScenarios (allScenarios, scenarioName, scenarioDesc)
 import Tester.TestTypes
+import Tester.StandardizeRunner (runStandardizeBatch)
 
 import Core.Standardize
-import Core.Logger    (withRunLog, logStandardize, logStdSkip)
+import Core.Logger    (withRunLog)
 import Core.Scanner   (listFilesRecursive)
 import Core.Detect    (detectType)
 import Core.Hash      (sha256File)
@@ -483,81 +484,13 @@ buildDicts ((idx, var):ts) tokens acc = do
               newInner = M.insert raw trans innerMap
           buildDicts ts tokens (M.insert var newInner acc)
 
-findMatchingRules :: [String] -> Maybe Char -> [ShapeRule] -> [ShapeRule]
-findMatchingRules shape delim rules =
-  let shapeMatches = filter (\r -> shapeTokens r == shape) rules
-      (delimMatches, otherMatches) = partition (\r -> ruleDelim r == delim) shapeMatches
-  in  delimMatches ++ otherMatches
-
-standardizeFile :: Handle -> Bool -> NameMapConfig -> FilePath -> IO ()
-standardizeFile h isDryRun cfg fp = do
-  let base   = dropExtension (takeFileName fp)
-      ext    = takeExtension fp
-      dir    = takeDirectory fp
-      tokens = tokenize base
-      shape  = shapeOf tokens
-      delim  = dominantDelim base
-      rules  = findMatchingRules shape delim (shapeRules cfg)
-
-  let stripDec ('*':xs) = stripDec xs
-      stripDec ('@':xs) = stripDec xs
-      stripDec xs       = xs
-
-  let globalDict = M.fromListWith M.union $ do
-        r <- shapeRules cfg
-        (var, dict) <- M.toList (dictMap r)
-        let globalPairs = [ (k, v) | (k, v) <- M.toList dict, '*' `elem` take 2 v ]
-            autoPairs   = [ (map toLower (stripDec tgt), stripDec tgt) | (_, tgt) <- globalPairs ]
-        return (var, M.fromList (globalPairs ++ autoPairs))
-
-  let tryRules [] lastErr =
-        case lastErr of
-          Just err -> do
-            putStrLn $ "[std-skip] " ++ base ++ ext ++ ": " ++ err
-            logStdSkip h fp err
-          Nothing -> return ()
-      tryRules (rule:rest) lastErr =
-        case find (\s -> stdId s == targetStd rule) (standards cfg) of
-          Nothing  -> tryRules rest (Just $ "unknown standard '" ++ targetStd rule ++ "'")
-          Just std -> do
-            let extracted = extractTokens (M.fromList (tokenMap rule)) (dictMap rule) globalDict tokens
-                rawBase   = applyStandard (stdPattern std) extracted
-            if hasUnresolved rawBase
-              then tryRules rest (Just $ "unresolved variables -> " ++ rawBase)
-              else do
-                let baseDest = sanitizeFileName rawBase
-                
-                -- Recursive loop to find an available Windows-style filename
-                let findUnique n = do
-                      let suffix = if n == 0 then "" else " (" ++ show n ++ ")"
-                          testName = baseDest ++ suffix
-                          testFp   = dir </> (testName ++ ext)
-                      exists <- doesFileExist testFp
-                      let isCaseChangeOnly = map toLower testFp == map toLower fp
-                      if exists && not isCaseChangeOnly
-                        then findUnique (n + 1)
-                        else return (testName, testFp)
-
-                (finalBase, newFp) <- findUnique 0
-
-                if newFp == fp
-                  then return ()
-                  else if isDryRun
-                    then putStrLn $ "[dry-run]  " ++ base ++ ext ++ " -> " ++ finalBase ++ ext
-                    else do
-                      renameFile fp newFp
-                      putStrLn $ "[std]      " ++ base ++ ext ++ " -> " ++ finalBase ++ ext
-                      logStandardize h fp newFp
-
-  tryRules rules Nothing
-
 runStandardize :: Bool -> IO ()
 runStandardize isDryRun = withRunLog testRoot $ \h -> do
   files <- listFilesRecursive h testRoot
   cfg   <- loadNameMapConfig
   let label = if isDryRun then "Dry-run preview" else "Standardizing"
   putStrLn $ "\n" ++ label ++ ": " ++ show (length files) ++ " file(s) in scope."
-  mapM_ (standardizeFile h isDryRun cfg) files
+  _ <- runStandardizeBatch h isDryRun cfg files
   putStrLn "Done."
 
 runFullOrganize :: IO ()
