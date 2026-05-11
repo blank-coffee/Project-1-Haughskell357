@@ -72,3 +72,13 @@ scripts/dedupe.sh
 
 # User-created rule presets
 /presets/rules/
+
+# --- Data and Configuration Artifacts ---
+/data/presets/*.json
+!/data/presets/scenarios/
+/data/maps/*.json
+!/data/maps/static/
+
+# --- Deprecated Group Artifacts ---
+test-data/
+/test-data/

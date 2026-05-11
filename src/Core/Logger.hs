@@ -5,6 +5,8 @@ module Core.Logger
   , logDirSkip
   , logDupeKept
   , logDupeMoved
+  , logStandardize
+  , logStdSkip
   ) where
 
 import System.Directory (createDirectoryIfMissing)
@@ -26,17 +28,27 @@ withRunLog root action = do
   hClose h
   pure result
 
+-- Tags are padded to 12 characters so log files align neatly in a viewer.
+
 logMove :: Handle -> FilePath -> FilePath -> IO ()
-logMove h src dest = hPutStrLn h $ "MOVED   " ++ src ++ " -> " ++ dest
+logMove h src dest = hPutStrLn h $ "MOVED        " ++ src ++ " -> " ++ dest
 
 logSkip :: Handle -> FilePath -> String -> IO ()
-logSkip h src reason = hPutStrLn h $ "SKIPPED " ++ src ++ ": " ++ reason
+logSkip h src reason = hPutStrLn h $ "SKIPPED      " ++ src ++ ": " ++ reason
 
 logDirSkip :: Handle -> FilePath -> String -> IO ()
-logDirSkip h dir reason = hPutStrLn h $ "DIR-SKIP " ++ dir ++ ": " ++ reason
+logDirSkip h dir reason = hPutStrLn h $ "DIR-SKIP     " ++ dir ++ ": " ++ reason
 
 logDupeKept :: Handle -> FilePath -> IO ()
-logDupeKept h path = hPutStrLn h $ "DUPE-KEPT " ++ path
+logDupeKept h path = hPutStrLn h $ "DUPE-KEPT    " ++ path
 
 logDupeMoved :: Handle -> FilePath -> FilePath -> IO ()
-logDupeMoved h src dest = hPutStrLn h $ "DUPE-MOVED " ++ src ++ " -> " ++ dest
+logDupeMoved h src dest = hPutStrLn h $ "DUPE-MOVED   " ++ src ++ " -> " ++ dest
+
+logStandardize :: Handle -> FilePath -> FilePath -> IO ()
+logStandardize h src dest = hPutStrLn h $ "STANDARDIZED " ++ src ++ " -> " ++ dest
+
+-- | Logged when a file matched a rule but the rename was skipped for a
+--   recoverable reason (unresolved variables, target already exists, etc.).
+logStdSkip :: Handle -> FilePath -> String -> IO ()
+logStdSkip h src reason = hPutStrLn h $ "STD-SKIP     " ++ src ++ ": " ++ reason

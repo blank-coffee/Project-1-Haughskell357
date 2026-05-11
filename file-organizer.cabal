@@ -22,12 +22,15 @@ library
     , Core.Backup
     , Core.RulePresets
     , Core.Logger
+    , Core.Standardize
     , Tester.Types
     , Tester.Templates
     , Tester.Presets
+    , Tester.NameMap
     , Tester.Scramble
     , Tester.Build
     , Tester.Menu
+    , Tester.StandardizeRunner
     -- Test integration
     , Tester.TestTypes
     , Tester.TestScenarios
@@ -37,6 +40,7 @@ library
     , Tester.Tests.ScannerTests
     , Tester.Tests.DedupeTests
     , Tester.Tests.OrganizerTests
+    , Tester.Tests.StandardizeTests
   build-depends:
       base ^>=4.18
     , bytestring

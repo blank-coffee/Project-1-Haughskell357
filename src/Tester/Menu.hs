@@ -6,21 +6,26 @@ import Control.Monad (forM_, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, SomeException)
 import Data.Char (isSpace, toLower)
-import Data.List (intercalate)
-import System.FilePath ((</>), takeFileName, takeDirectory)
+import Data.List (intercalate, find, nub, partition)
+import System.FilePath ((</>), takeFileName, takeDirectory, dropExtension, takeExtension)
 import Text.Read (readMaybe)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist)
+import System.IO (Handle)
+import qualified Data.Map.Strict as M
 
 import Tester.Types
 import Tester.Templates
 import Tester.Presets
-import Tester.Scramble (autoVariants, applyVariant, enabledVariants)
+import Tester.NameMap
+import Tester.Scramble (autoVariants)
 import Tester.Build
 import Tester.TestRegistry  (allTests)
 import Tester.TestRunner
 import Tester.TestScenarios (allScenarios, scenarioName, scenarioDesc)
 import Tester.TestTypes
+import Tester.StandardizeRunner (runStandardizeBatch)
 
+import Core.Standardize
 import Core.Logger     (withRunLog)
 import Core.Scanner    (listFilesRecursive)
 import Core.Detect     (detectType)
@@ -35,8 +40,6 @@ import Core.RulePresets
 
 runTester :: IO ()
 runTester = runInputT defaultSettings mainMenu
-
--- ─── Input Helpers ──────────────────────────────────────────────────────────
 
 ask :: String -> InputT IO String
 ask p = do
@@ -62,15 +65,14 @@ normalizeExt ""        = ".txt"
 normalizeExt s@('.':_) = s
 normalizeExt s         = '.' : s
 
--- | Safeguards actions that require a built test-root
+showTok :: Token -> String
+showTok (Alpha _ o) = "Alpha(\"" ++ o ++ "\")"
+showTok (Num   n)   = "Num("    ++ show n ++ ")"
+
 withTestRoot :: InputT IO () -> InputT IO ()
 withTestRoot action = do
   exists <- liftIO $ doesDirectoryExist testRoot
-  if exists
-    then action
-    else outputStrLn "  Error: test-root does not exist. Please build a preset first."
-
--- ─── Main Menu ──────────────────────────────────────────────────────────────
+  if exists then action else outputStrLn "  Error: test-root does not exist. Please build a preset first."
 
 mainMenu :: InputT IO ()
 mainMenu = do
@@ -88,11 +90,9 @@ mainMenu = do
     "6" -> yesNo "Remove test-root, manifest, options, and user presets?" >>= \ok -> when ok (liftIO fullReset) >> mainMenu
     "7" -> runOrganizerMenu >> mainMenu
     "8" -> runTestsMenu >> mainMenu
-    "9" -> manageRulesMenu >> mainMenu
+    "9" -> manageSortRulesMenu >> mainMenu
     "0" -> outputStrLn "Goodbye!"
     _   -> outputStrLn "Invalid choice." >> mainMenu
-
--- ─── Menus & Forms ──────────────────────────────────────────────────────────
 
 loadPresetMenu :: InputT IO ()
 loadPresetMenu = do
@@ -311,11 +311,12 @@ manageVariantsMenu opt = do
 
 runOrganizerMenu :: InputT IO ()
 runOrganizerMenu = do
-  outputStrLn "\n-- Run Organizer --\n  1) Dry-run scan\n  2) Dedupe\n  3) Full Organize\n  0) Back"
+  outputStrLn "\n-- Run Organizer --\n  1) Dry-run scan\n  2) Dedupe\n  3) Full Organize\n  4) Standardize Names\n  0) Back"
   ask "Choice: " >>= \case
     "1" -> withTestRoot (liftIO runDryScan) >> runOrganizerMenu
     "2" -> withTestRoot runDedupeMenu >> runOrganizerMenu
-    "3" -> withTestRoot (pickRulesAndOrganize) >> runOrganizerMenu
+    "3" -> withTestRoot pickRulesAndOrganize >> runOrganizerMenu
+    "4" -> withTestRoot standardizeMenu >> runOrganizerMenu
     "0" -> return ()
     _   -> runOrganizerMenu
 
@@ -331,7 +332,7 @@ pickRulePreset = do
     useRules <- yesNo "Apply custom sort rules?"
     if not useRules then return [] else do
       outputStrLn "\n-- Select Rule Preset --"
-      numbered (map (\p -> takeFileName p) presets)
+      numbered (map takeFileName presets)
       outputStrLn "  0) None (type-based only)"
       choice <- ask "Choice: "
       case readMaybe choice :: Maybe Int of
@@ -353,6 +354,186 @@ runFullOrganize rules = withRunLog testRoot $ \h -> do
     let opts = OrganizeOptions { optDryRun = False, optVerbose = False, optCustomRules = rules }
     organizeByTypeWith opts testRoot h files
     putStrLn "Organization complete."
+
+standardizeMenu :: InputT IO ()
+standardizeMenu = do
+  outputStrLn "\n-- Standardize Names --\n  1) Dry run (preview renames)\n  2) Apply standardization\n  3) Rule Builder\n  4) Manage Rules\n  0) Back"
+  ask "Choice: " >>= \case
+    "1" -> liftIO (runStandardize True)  >> standardizeMenu
+    "2" -> liftIO (runStandardize False) >> standardizeMenu
+    "3" -> ruleBuilderMenu >> standardizeMenu
+    "4" -> manageRulesMenu >> standardizeMenu
+    "0" -> return ()
+    _   -> standardizeMenu
+
+ruleBuilderMenu :: InputT IO ()
+ruleBuilderMenu = do
+  files <- liftIO $ withRunLog testRoot $ \h -> listFilesRecursive h testRoot
+  let withExt = filter (\f -> takeExtension f /= "") files
+  if null withExt
+    then outputStrLn "  No files with extensions found in test-root."
+    else do
+      outputStrLn "\n-- Rule Builder: pick a file to model --"
+      numbered withExt
+      outputStrLn "  0) Cancel"
+      choice <- ask "Choice: "
+      case readMaybe choice :: Maybe Int of
+        Just 0 -> return ()
+        Just n | n >= 1 && n <= length withExt -> buildRuleFor (withExt !! (n - 1))
+        _ -> outputStrLn "  Invalid choice."
+
+buildRuleFor :: FilePath -> InputT IO ()
+buildRuleFor fp = do
+  let file   = takeFileName fp
+      base   = dropExtension file
+      tokens = tokenize base
+      shape  = shapeOf tokens
+      delim  = dominantDelim base
+
+  outputStrLn $ "\n  File:      " ++ file
+  outputStrLn $ "  Tokens:    " ++ intercalate "  " [ show i ++ ":" ++ showTok t | (i, t) <- zip [1 :: Int ..] tokens ]
+  outputStrLn $ "  Shape:     " ++ unwords shape
+  outputStrLn $ "  Delimiter: " ++ maybe "(none detected)" (:[]) delim
+
+  cfg <- liftIO loadNameMapConfig
+  rName <- ask "\nRule name (unique identifier, empty to cancel): "
+  if null rName then outputStrLn "  Cancelled." else do
+    case find (\r -> ruleName r == rName) (shapeRules cfg) of
+      Just _  -> outputStrLn $ "  Note: existing rule '" ++ rName ++ "' will be overwritten."
+      Nothing -> outputStrLn $ "  Creating new rule '" ++ rName ++ "'."
+
+    outputStrLn "\n-- Select or create a naming standard --"
+    let stds = standards cfg
+    if null stds then outputStrLn "  (no standards saved yet)" else numbered [ stdId s ++ "  ->  " ++ stdPattern s | s <- stds ]
+    outputStrLn "  0) Create new standard"
+    stdChoice <- ask "Choice: "
+    mStd <- case readMaybe stdChoice :: Maybe Int of
+      Just 0                               -> createStandardMenu cfg
+      Just m | m >= 1 && m <= length stds  -> return (Just (stds !! (m - 1)))
+      _                                    -> outputStrLn "  Invalid, cancelled." >> return Nothing
+
+    case mStd of
+      Nothing  -> return ()
+      Just std -> do
+        let patVars = extractPatternVars (stdPattern std)
+        outputStrLn $ "\n  Standard:  " ++ stdId std
+        outputStrLn $ "  Pattern:   " ++ stdPattern std
+        outputStrLn $ "  Variables: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") patVars)
+
+        outputStrLn "\n-- Map token positions to pattern variables --"
+        outputStrLn "  Enter a variable name, 'x' to skip, '!' to abort."
+        tmap <- mapTokens 1 tokens []
+
+        when (not (null tmap)) $ do
+          let mappedVars = map snd tmap
+              dups = nub [ v | v <- mappedVars, length (filter (== v) mappedVars) > 1 ]
+          when (not (null dups)) $
+            outputStrLn $ "  Warning: variable(s) mapped to multiple tokens: " ++ intercalate ", " dups
+
+          let unmapped = filter (`notElem` mappedVars) patVars
+          when (not (null unmapped)) $
+            outputStrLn $ "  Warning: pattern variable(s) with no token assigned: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") unmapped)
+
+          outputStrLn "\n-- Translation dictionaries --"
+          outputStrLn "  For each mapped token, optionally provide a translation."
+          outputStrLn "  (Enter=keep, !=abort, *=global map, @=strict anchor e.g. @357)"
+          (finalDict, aborted) <- buildDicts tmap tokens M.empty
+
+          when (not aborted) $ do
+            cfg' <- liftIO loadNameMapConfig
+            let newRule = ShapeRule rName shape delim tmap (stdId std) finalDict
+                others  = filter (\r -> ruleName r /= rName) (shapeRules cfg')
+            liftIO $ saveNameMapConfig (cfg' { shapeRules = others ++ [newRule] })
+            outputStrLn $ "\n  Rule '" ++ rName ++ "' saved."
+
+createStandardMenu :: NameMapConfig -> InputT IO (Maybe NameStandard)
+createStandardMenu cfg = do
+  outputStrLn "\n-- Create New Standard --"
+  sid <- ask "Standard ID (e.g. univ-assignment): "
+  if null sid then return Nothing else do
+    pat <- ask "Pattern   (e.g. {class}-{number}_{type} {counter}): "
+    if null pat then return Nothing else do
+      let vars = extractPatternVars pat
+      if null vars
+        then outputStrLn "  Warning: no {variables} found in pattern." >> yesNo "  Save anyway?" >>= \ok -> if ok then persist sid pat else return Nothing
+        else outputStrLn ("  Variables detected: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") vars)) >> yesNo "  Save this standard?" >>= \ok -> if ok then persist sid pat else return Nothing
+  where
+    persist sid pat = do
+      let std = NameStandard sid pat
+      liftIO $ saveNameMapConfig (cfg { standards = standards cfg ++ [std] })
+      outputStrLn $ "  Standard '" ++ sid ++ "' saved."
+      return (Just std)
+
+-- | Manage standardization shape rules (used within Standardize Names menu).
+manageRulesMenu :: InputT IO ()
+manageRulesMenu = do
+  cfg <- liftIO loadNameMapConfig
+  let rules = shapeRules cfg
+  outputStrLn "\n-- Manage Rules --"
+  if null rules
+    then outputStrLn "  (no rules saved yet)"
+    else forM_ (zip [1 :: Int ..] rules) $ \(i, r) -> do
+      outputStrLn $ "\n  " ++ show i ++ ") " ++ ruleName r
+      outputStrLn $ "     Shape:    " ++ unwords (shapeTokens r)
+      outputStrLn $ "     Delim:    " ++ maybe "(any)" (:[]) (ruleDelim r)
+      outputStrLn $ "     Standard: " ++ targetStd r
+      outputStrLn $ "     Tokens:   " ++ intercalate ", " [ show pos ++ "->{" ++ v ++ "}" | (pos, v) <- tokenMap r ]
+  outputStrLn "\n  d <n>) Delete a rule\n  0) Back"
+  raw <- ask "Action: "
+  let (cmd, restStr) = break isSpace raw
+      idxs = parseInts restStr
+  case cmd of
+    "d" | not (null idxs) -> do
+      let idx = head idxs
+      if idx >= 1 && idx <= length rules
+        then do
+          let r = rules !! (idx - 1)
+          ok <- yesNo $ "Delete rule '" ++ ruleName r ++ "'?"
+          when ok $ do
+            liftIO $ saveNameMapConfig (cfg { shapeRules = filter (\x -> ruleName x /= ruleName r) rules })
+            outputStrLn "  Deleted."
+          manageRulesMenu
+        else outputStrLn "  Index out of range." >> manageRulesMenu
+    "0" -> return ()
+    _   -> manageRulesMenu
+
+mapTokens :: Int -> [Token] -> [(Int, String)] -> InputT IO [(Int, String)]
+mapTokens idx tokens acc
+  | idx > length tokens = return acc
+  | otherwise = do
+      let tok = tokens !! (idx - 1)
+      res <- ask $ "  Token " ++ show idx ++ " " ++ showTok tok ++ " -> variable (x=skip, !=abort): "
+      case res of
+        "!" -> return []
+        "x" -> mapTokens (idx + 1) tokens acc
+        ""  -> mapTokens idx tokens acc
+        var -> mapTokens (idx + 1) tokens (acc ++ [(idx, var)])
+
+buildDicts :: [(Int, String)] -> [Token] -> M.Map String (M.Map String String) -> InputT IO (M.Map String (M.Map String String), Bool)
+buildDicts [] _ acc = return (acc, False)
+buildDicts ((idx, var):ts) tokens acc = do
+  if map toLower var == "counter"
+    then buildDicts ts tokens acc
+    else do
+      let tok = tokens !! (idx - 1)
+          raw = case tok of Alpha n _ -> n; Num num -> show num
+      res <- ask $ "  Translate '" ++ raw ++ "' for {" ++ var ++ "}? (Enter=keep, !=abort, *=global, @=anchor): "
+      case res of
+        "!" -> return (acc, True)
+        ""  -> buildDicts ts tokens acc
+        trans -> do
+          let innerMap = M.findWithDefault M.empty var acc
+              newInner = M.insert raw trans innerMap
+          buildDicts ts tokens (M.insert var newInner acc)
+
+runStandardize :: Bool -> IO ()
+runStandardize isDryRun = withRunLog testRoot $ \h -> do
+  files <- listFilesRecursive h testRoot
+  cfg   <- loadNameMapConfig
+  let label = if isDryRun then "Dry-run preview" else "Standardizing"
+  putStrLn $ "\n" ++ label ++ ": " ++ show (length files) ++ " file(s) in scope."
+  _ <- runStandardizeBatch h isDryRun cfg files
+  putStrLn "Done."
 
 runDryScan :: IO ()
 runDryScan = withRunLog testRoot $ \h -> do
@@ -379,15 +560,17 @@ runDedupeMenu = do
 
 -- ─── Sort Rules ─────────────────────────────────────────────────────────────
 
-manageRulesMenu :: InputT IO ()
-manageRulesMenu = do
+-- | Manage custom folder-sort rules (keyword -> folder presets). Distinct from
+--   manageRulesMenu which handles standardization shape rules.
+manageSortRulesMenu :: InputT IO ()
+manageSortRulesMenu = do
   outputStrLn "\n-- Manage Sort Rules --\n  1) List presets\n  2) Create preset\n  3) Delete preset\n  0) Back"
   ask "Choice: " >>= \case
-    "1" -> listRulePresetsMenu >> manageRulesMenu
-    "2" -> createRulePresetMenu >> manageRulesMenu
-    "3" -> deleteRulePresetMenu >> manageRulesMenu
+    "1" -> listRulePresetsMenu >> manageSortRulesMenu
+    "2" -> createRulePresetMenu >> manageSortRulesMenu
+    "3" -> deleteRulePresetMenu >> manageSortRulesMenu
     "0" -> return ()
-    _   -> outputStrLn "Invalid." >> manageRulesMenu
+    _   -> outputStrLn "Invalid." >> manageSortRulesMenu
 
 listRulePresetsMenu :: InputT IO ()
 listRulePresetsMenu = do
@@ -451,7 +634,7 @@ runTestsMenu = do
              Just n | n >= 1 && n <= length scenarios -> liftIO (runByScenario (scenarioName (scenarios !! (n-1))) allTests) >>= printOutcomes >> runTestsMenu
              _ -> runTestsMenu
     "4" -> forM_ allTests (\s -> outputStrLn $ "  " ++ testName s) >> runTestsMenu
-    "5" -> forM_ scenarios (\s -> outputStrLn $ "  " ++ scenarioName s) >> runTestsMenu
+    "5" -> forM_ scenarios (\s -> outputStrLn $ "  " ++ scenarioName s ++ "  — " ++ scenarioDesc s) >> runTestsMenu
     "0" -> return ()
     _   -> runTestsMenu
 
@@ -462,9 +645,8 @@ printOutcomes outcomes = do
   forM_ outcomes $ \o -> do
     outputStrLn $ (if outResult o == Pass then "PASS" else "FAIL") ++ " [" ++ outScenario o ++ "] " ++ outTestName o
     case outResult o of
-      Fail r -> outputStrLn $ "       → " ++ r
+      Fail r -> outputStrLn $ "       -> " ++ r
       Pass   -> return ()
   outputStrLn (replicate 60 '-')
   let (p, f, t) = (passCount outcomes, failCount outcomes, length outcomes)
-  outputStrLn $ "  Passed: " ++ show p ++ " / " ++ show t ++ (if f > 0 then " (" ++ show f ++ " failed)" else " ✓")
-  
+  outputStrLn $ "  Passed: " ++ show p ++ " / " ++ show t ++ (if f > 0 then " (" ++ show f ++ " failed)" else " OK")

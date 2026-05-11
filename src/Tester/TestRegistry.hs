@@ -5,6 +5,7 @@ import Tester.Tests.HashTests      (hashTests)
 import Tester.Tests.ScannerTests   (scannerTests)
 import Tester.Tests.DedupeTests    (dedupeTests)
 import Tester.Tests.OrganizerTests (organizerTests)
+import Tester.Tests.StandardizeTests (standardizeTests)
 
 allTests :: [TestSpec]
 allTests
@@ -12,3 +13,4 @@ allTests
   ++ scannerTests
   ++ dedupeTests
   ++ organizerTests
+  ++ standardizeTests

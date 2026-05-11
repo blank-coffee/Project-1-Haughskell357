@@ -19,7 +19,7 @@ import Control.Monad (forM, forM_, when, void)
 import Data.List (find)
 import Data.Aeson (encodeFile, eitherDecodeFileStrict)
 import System.Info (os)
-import System.Process (spawnCommand)
+import System.Process (spawnCommand, callCommand)
 import Control.Exception (try, SomeException)
 
 import Tester.Types
@@ -44,7 +44,8 @@ closeExplorer :: IO ()
 closeExplorer = do
   let script | os == "mingw32" = "powershell -Command \"(New-Object -comObject Shell.Application).Windows() | ? { $_.LocationName -eq 'test-root' } | % { $_.Quit() }\""
              | otherwise       = "wmctrl -c \"test-root\""
-  void $ (try (void (spawnCommand script)) :: IO (Either SomeException ()))
+  -- Use callCommand to wait for the process to finish before continuing
+  void $ (try (callCommand script) :: IO (Either SomeException ()))
 
 -- ─── Build ──────────────────────────────────────────────────────────────────
 
@@ -130,17 +131,26 @@ clearTestRoot = do
   removePathForcibly manifestPath
   putStrLn $ "Cleared " ++ testRoot ++ "/"
 
+-- In your fullReset function, replace the `presetsExists` block with:
+
 fullReset :: IO ()
 fullReset = do
   closeExplorer
   removePathForcibly testRoot
   removePathForcibly manifestPath
-  presetsExists <- doesDirectoryExist "presets"
-  when presetsExists $ do
-    entries <- listDirectory "presets"
-    forM_ entries $ \e ->
-      when (takeExtension e == ".json") $
-        removePathForcibly ("presets" </> e)
+  
+  -- Helper to wipe JSON files in a specific directory
+  let wipeUserFiles dir = do
+        exists <- doesDirectoryExist dir
+        when exists $ do
+          entries <- listDirectory dir
+          forM_ entries $ \e ->
+            when (takeExtension e == ".json") $
+              removePathForcibly (dir </> e)
+
+  wipeUserFiles ("data" </> "presets")
+  wipeUserFiles ("data" </> "maps")
+  
   putStrLn "Full reset complete."
-  putStrLn "  Removed: test-root, manifest, options.json, user preset files."
-  putStrLn "  Preserved: presets/scenarios/"
+  putStrLn "  Removed: test-root, manifest, user options, user presets, user rules."
+  putStrLn "  Preserved: data/presets/scenarios/ and data/maps/static/"

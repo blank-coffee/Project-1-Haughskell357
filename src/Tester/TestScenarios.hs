@@ -93,8 +93,18 @@ allScenarios = do
 -- | The hardcoded scenarios.  These are the authoritative source for tests
 --   that depend on specific filenames or file content.
 staticScenarios :: [TestScenario]
-staticScenarios = [duplicatesScenario, nestedScenario, originalDataScenario]
+staticScenarios = [duplicatesScenario, nestedScenario, originalDataScenario, stdCollisionScenario]
 
+stdCollisionScenario :: TestScenario
+stdCollisionScenario = TestScenario
+  { scenarioName  = "std-collision"
+  , scenarioDesc  = "Files that will collide during standardization"
+  , scenarioFiles =
+      [ TestFile "fileA_1.txt" "content A"
+      , TestFile "fileB_1.txt" "content B"
+      , TestFile "fileC_1.txt" "content C"
+      ]
+  }
 scenarioNames :: IO [String]
 scenarioNames = map scenarioName <$> allScenarios
 
