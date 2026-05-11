@@ -55,6 +55,10 @@ scripts/dedupe.sh
 .env
 .env.local
 
+# Run logs and Claude Code session data
+.file-organizer-logs/
+.claude/
+
 # --- Tester System Artifacts ---
 # The active testing directory created by buildScenario
 /test-root/
@@ -66,9 +70,8 @@ scripts/dedupe.sh
 /presets/*.json
 !/presets/scenarios/
 
-# --- AI CLI Tools ---
-.claude/
-.claude
+# User-created rule presets
+/presets/rules/
 
 # --- Data and Configuration Artifacts ---
 /data/presets/*.json

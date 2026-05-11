@@ -19,6 +19,7 @@ library
     , Core.Dedupe
     , Core.Organizer
     , Core.Backup
+    , Core.RulePresets
     , Core.Logger
     , Core.Standardize
     , Tester.Types

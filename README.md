@@ -21,6 +21,7 @@ Located in `src/`:
   - `--undo`
   - `--cleanup`
   - `--no-prompt`
+  - `--rule=keyword:folder` (repeatable, see §9)
 
 - **Tester.hs**  
   An interactive REPL‑style tester used for:
@@ -208,7 +209,32 @@ Undo is only enabled after a successful non‑dry‑run sort.
 
 ---
 
-## 9. Run Logging
+## 9. Custom Folder Sorting
+
+Files can be routed into custom folders based on a keyword match against the filename, taking priority over MIME-type classification. Matching is case-insensitive.
+
+### CLI usage (repeatable)
+
+```
+stack run file-organizer -- --rule=CS-357:cs --rule=MATH-314:math ~/Downloads
+```
+
+A file named `CS-357-notes.txt` would be placed in `cs/` instead of `text/`.
+
+### Tester menu
+
+Custom rules can be saved as named presets via **9) Manage Sort Rules**:
+- **Create preset** — enter a name, then add keyword → folder pairs one at a time
+- **List presets** — view all saved presets and their rules
+- **Delete preset** — remove a saved preset
+
+When running **Full Organize** from the tester, you will be prompted to optionally select a saved rule preset to apply.
+
+Rule presets are stored in `presets/rules/` as JSON and are excluded from version control.
+
+---
+
+## 10. Run Logging
 
 Every run (sort, scan, dedupe) produces a timestamped log file inside the target folder:
 
@@ -230,7 +256,7 @@ The `.file-organizer-logs/` directory is excluded from sorting and backups.
 
 ---
 
-## 10. Reset Workflow
+## 11. Reset Workflow
 
 The **Reset** button runs:
 
@@ -249,7 +275,7 @@ Not required for preset/config changes.
 ---
 
 
-## 11. Development Notes
+## 12. Development Notes
 
 ### **10.1 Process Safety**
 - Never modify `tester_process` outside `kill_tester_process()` or tester startup.
@@ -270,7 +296,7 @@ Not required for preset/config changes.
 
 ---
 
-## 12. Current Status
+## 13. Current Status
 
 The system now supports:
 
@@ -282,6 +308,11 @@ The system now supports:
 - Accurate progress parsing  
 - Fully functional GUI + CLI modes  
 - Developer‑safe workflows  
+- Dry-run, verbose, scan, undo, and cleanup flags  
+- SHA-256 deduplication with `deleteme/` quarantine  
+- Timestamped run logging (MOVED, SKIPPED, DIR-SKIP, DUPE-KEPT, DUPE-MOVED, STANDARDIZED)  
+- Custom folder sorting by keyword with saved presets  
+- File name standardization via token-based rule builder  
 
 
 
