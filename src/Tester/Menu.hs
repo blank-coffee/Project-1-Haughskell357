@@ -7,7 +7,6 @@ import Data.Char (isSpace, toLower)
 import Data.List (intercalate, find, nub)
 import System.FilePath ((</>), takeFileName, takeDirectory, dropExtension, takeExtension)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist)
---import System.IO (hFlush, stdout)
 import System.IO (hFlush, stdout, stderr, hPutStr, hReady, stdin)
 
 import Text.Read (readMaybe)
