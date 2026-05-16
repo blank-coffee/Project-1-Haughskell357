@@ -1,16 +1,16 @@
 {-# LANGUAGE LambdaCase #-}
 module Tester.Menu (runTester) where
 
-import System.Console.Haskeline
 import Control.Monad (forM_, when)
-import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, SomeException)
 import Data.Char (isSpace, toLower)
-import Data.List (intercalate, find, nub, partition)
+import Data.List (intercalate, find, nub)
 import System.FilePath ((</>), takeFileName, takeDirectory, dropExtension, takeExtension)
-import Text.Read (readMaybe)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist)
-import System.IO (Handle)
+--import System.IO (hFlush, stdout)
+import System.IO (hFlush, stdout, stderr, hPutStr, hReady, stdin)
+
+import Text.Read (readMaybe)
 import qualified Data.Map.Strict as M
 
 import Tester.Types
@@ -19,13 +19,19 @@ import Tester.Presets
 import Tester.NameMap
 import Tester.Scramble (autoVariants)
 import Tester.Build
-import Tester.TestRegistry  (allTests)
+import Tester.TestRegistry (allTests)
 import Tester.TestRunner
 import Tester.TestScenarios (allScenarios, scenarioName, scenarioDesc)
 import Tester.TestTypes
 import Tester.StandardizeRunner (runStandardizeBatch)
 
 import Core.Standardize
+import Core.Logger (withRunLog)
+import Core.Scanner (listFilesRecursive)
+import Core.Detect (detectType)
+import Core.Hash (sha256File)
+import Core.Dedupe (dedupe)
+import Core.Organizer (organizeByType)
 import Core.Logger     (withRunLog)
 import Core.Scanner    (listFilesRecursive)
 import Core.Detect     (detectType)
@@ -38,21 +44,50 @@ import Core.RulePresets
   , listRulePresets, loadRulePreset, saveRulePreset, deleteRulePreset
   )
 
-runTester :: IO ()
-runTester = runInputT defaultSettings mainMenu
 
-ask :: String -> InputT IO String
-ask p = do
-  mi <- getInputLine p
-  return $ maybe "" (dropWhile isSpace . reverse . dropWhile isSpace . reverse) mi
 
-yesNo :: String -> InputT IO Bool
-yesNo p = do
-  r <- ask (p ++ " [y/n]: ")
+colorHeader :: String -> String
+colorHeader s = "\ESC[1;36m" ++ s ++ "\ESC[0m"
+
+colorPass :: String -> String
+colorPass s = "\ESC[1;32m" ++ s ++ "\ESC[0m"
+
+colorFail :: String -> String
+colorFail s = "\ESC[1;31m" ++ s ++ "\ESC[0m"
+
+colorWarn :: String -> String
+colorWarn s = "\ESC[1;33m" ++ s ++ "\ESC[0m"
+
+colorInfo :: String -> String
+colorInfo s = "\ESC[1;34m" ++ s ++ "\ESC[0m"
+
+
+
+trim :: String -> String
+trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
+
+clearStdin :: IO ()
+clearStdin = do
+  ready <- hReady stdin
+  when ready $ do _ <- getChar; clearStdin
+
+askSimple :: String -> IO String
+askSimple p = do
+  clearStdin
+  putStr p
+  hFlush stdout
+  line <- getLine
+  return (trim line)
+
+
+yesNoSimple :: String -> IO Bool
+yesNoSimple p = do
+  r <- askSimple (p ++ " [y/n]: \n")
   return $ map toLower r `elem` ["y", "yes"]
 
-numbered :: [String] -> InputT IO ()
-numbered xs = forM_ (zip [1 :: Int ..] xs) $ \(i, x) -> outputStrLn $ "  " ++ show i ++ ") " ++ x
+numbered :: [String] -> IO ()
+numbered xs = forM_ (zip [1 :: Int ..] xs) $ \(i, x) ->
+  putStrLn $ "  " ++ show i ++ ") " ++ x
 
 parseInts :: String -> [Int]
 parseInts = foldr (\w acc -> case readMaybe w of { Just n -> n:acc; Nothing -> acc }) [] . words
@@ -69,150 +104,189 @@ showTok :: Token -> String
 showTok (Alpha _ o) = "Alpha(\"" ++ o ++ "\")"
 showTok (Num   n)   = "Num("    ++ show n ++ ")"
 
-withTestRoot :: InputT IO () -> InputT IO ()
+withTestRoot :: IO () -> IO ()
 withTestRoot action = do
-  exists <- liftIO $ doesDirectoryExist testRoot
-  if exists then action else outputStrLn "  Error: test-root does not exist. Please build a preset first."
+  exists <- doesDirectoryExist testRoot
+  if exists then action else putStrLn (colorFail "  Error: test-root does not exist. Please build a preset first.")
 
-mainMenu :: InputT IO ()
+
+runTester :: IO ()
+runTester = mainMenu
+
+mainMenu :: IO ()
 mainMenu = do
-  outputStrLn "\n===============================\n    File Organizer Tester\n==============================="
-  outputStrLn "  1) Load and build a preset\n  2) Manage Presets\n  3) Manage File Options"
-  outputStrLn "  4) Vary test-root files\n  5) Clear test-root\n  6) Full reset"
-  outputStrLn "  7) Run organizer\n  8) Run tests\n  9) Manage Sort Rules\n  0) Quit\n==============================="
-  choice <- ask "Choice: "
+  putStrLn $ colorHeader "\n===============================\n    File Organizer Tester\n==============================="
+  putStrLn "  1) Load and build a preset"
+  putStrLn "  2) Manage Presets"
+  putStrLn "  3) Manage File Options"
+  putStrLn "  4) Vary test-root files"
+  putStrLn "  5) Clear test-root"
+  putStrLn "  6) Full reset"
+  putStrLn "  7) Run organizer"
+  putStrLn "  8) Run tests"
+  putStrLn "  9) Quit"
+  putStrLn   "==============================="
+
+  hFlush stdout
+  choice <- askSimple "Choice: \n"
+
   case choice of
     "1" -> loadPresetMenu >> mainMenu
     "2" -> managePresetsMenu >> mainMenu
     "3" -> manageOptionsMenu >> mainMenu
-    "4" -> withTestRoot (liftIO loadOptions >>= liftIO . varyTestRoot) >> mainMenu
-    "5" -> yesNo "Clear test-root?" >>= \ok -> when ok (liftIO clearTestRoot) >> mainMenu
-    "6" -> yesNo "Remove test-root, manifest, options, and user presets?" >>= \ok -> when ok (liftIO fullReset) >> mainMenu
+    "4" -> withTestRoot (loadOptions >>= varyTestRoot) >> mainMenu
+    "5" -> yesNoSimple "Clear test-root?" >>= \ok -> when ok clearTestRoot >> mainMenu
+    "6" -> yesNoSimple "Remove test-root, manifest, options, and user presets?" >>= \ok -> when ok fullReset >> mainMenu
     "7" -> runOrganizerMenu >> mainMenu
     "8" -> runTestsMenu >> mainMenu
     "9" -> manageSortRulesMenu >> mainMenu
     "0" -> outputStrLn "Goodbye!"
     _   -> outputStrLn "Invalid choice." >> mainMenu
 
-loadPresetMenu :: InputT IO ()
+
+loadPresetMenu :: IO ()
 loadPresetMenu = do
-  presets <- liftIO listPresets
-  if null presets then outputStrLn "No presets saved yet." else do
-    outputStrLn "\n-- Load Preset --"
+  presets <- listPresets
+  if null presets then putStrLn "No presets saved yet." else do
+    putStrLn "\n-- Load Preset --"
+    hFlush stdout
     numbered $ map (\p -> (if takeFileName (takeDirectory p) == "scenarios" then "[Static] " else "[User]   ") ++ takeFileName p) presets
-    outputStrLn "  0) Back"
-    choice <- ask "Choice: "
+    putStrLn "  0) Back"
+    choice <- askSimple "Choice: \n"
     case readMaybe choice :: Maybe Int of
       Just 0 -> return ()
       Just n | n >= 1 && n <= length presets -> do
-        res <- liftIO (loadPreset (presets !! (n-1)))
+        res <- loadPreset (presets !! (n-1))
         case res of
-          Left err -> outputStrLn $ "Error: " ++ err
+          Left err -> putStrLn $ colorFail ("Error: " ++ err)
           Right p  -> do
-            opts <- liftIO loadOptions
-            liftIO (buildPreset opts p)
-            outputStrLn "Done!"
-            vary <- yesNo "Apply vary now?"
-            when vary $ liftIO (varyTestRoot opts)
-      _ -> outputStrLn "Invalid choice."
+            opts <- loadOptions
+            buildPreset opts p
+            putStrLn (colorInfo "Done!")
+            vary <- yesNoSimple "Apply vary now?"
+            when vary (varyTestRoot opts)
+      _ -> putStrLn "Invalid choice."
 
-managePresetsMenu :: InputT IO ()
+
+managePresetsMenu :: IO ()
 managePresetsMenu = do
-  outputStrLn "\n-- Manage Presets --\n  1) Create new\n  2) Edit existing\n  3) Delete\n  0) Back"
-  ask "Choice: " >>= \case
+  putStrLn "\n-- Manage Presets --\n  1) Create new\n  2) Edit existing\n  3) Delete\n  0) Back"
+  askSimple "Choice: \n" >>= \case
     "1" -> createPresetMenu >> managePresetsMenu
     "2" -> editPresetMenu >> managePresetsMenu
     "3" -> deletePresetMenu >> managePresetsMenu
     "0" -> return ()
-    _   -> outputStrLn "Invalid." >> managePresetsMenu
+    _   -> putStrLn "Invalid." >> managePresetsMenu
 
-createPresetMenu :: InputT IO ()
+
+createPresetMenu :: IO ()
 createPresetMenu = do
-  name <- ask "\nPreset name: "
+  name <- askSimple "\nPreset name: \n"
   if null name then return () else do
-    opts <- liftIO loadOptions
-    if null opts then outputStrLn "No file options yet." else do
+    opts <- loadOptions
+    if null opts then putStrLn "No file options yet." else do
       folders <- collectFolders opts []
-      if null folders then outputStrLn "Discarded." else do
+      if null folders then putStrLn "Discarded." else do
         let preset = Preset name folders
-        save <- yesNo "Save?"
+        save <- yesNoSimple "Save?"
         when save $ do
-          isStatic <- yesNo "Save as static?"
-          let path = (if isStatic then presetsDir </> "scenarios" else presetsDir) </> map (\c -> if isSpace c then '-' else c) name ++ ".json"
-          liftIO $ createDirectoryIfMissing True (takeDirectory path) >> savePreset preset path
-          outputStrLn $ "Saved to " ++ path
-        build <- yesNo "Build test-root now?"
-        when build $ liftIO (buildPreset opts preset) >> yesNo "Apply vary?" >>= \v -> when v (liftIO $ varyTestRoot opts)
+          isStatic <- yesNoSimple "Save as static?"
+          let path = (if isStatic then presetsDir </> "scenarios" else presetsDir)
+                     </> map (\c -> if isSpace c then '-' else c) name ++ ".json"
+          createDirectoryIfMissing True (takeDirectory path)
+          savePreset preset path
+          putStrLn $ colorInfo ("Saved to " ++ path)
+        build <- yesNoSimple "Build test-root now?"
+        when build $ do
+          buildPreset opts preset
+          yesNoSimple "Apply vary?" >>= \v -> when v (varyTestRoot opts)
 
-editPresetMenu :: InputT IO ()
+
+editPresetMenu :: IO ()
 editPresetMenu = do
-  presets <- liftIO listPresets
-  if null presets then outputStrLn "No presets." else do
-    outputStrLn "\n-- Edit Preset --"
+  presets <- listPresets
+  if null presets then putStrLn "No presets." else do
+    putStrLn "\n-- Edit Preset --"
     numbered $ map (\p -> (if takeFileName (takeDirectory p) == "scenarios" then "[Static] " else "[User]   ") ++ takeFileName p) presets
-    choice <- ask "Choice (0 to Cancel): "
+    choice <- askSimple "Choice (0 to Cancel): \n"
     case readMaybe choice :: Maybe Int of
       Just n | n >= 1 && n <= length presets -> do
         let path = presets !! (n-1)
-        res <- liftIO $ loadPreset path
+        res <- loadPreset path
         case res of
-          Left e -> outputStrLn $ "Error: " ++ e
+          Left e -> putStrLn $ colorFail ("Error: " ++ e)
           Right p -> do
-            newNameRaw <- ask $ "New preset name (empty to keep '" ++ presetName p ++ "'): "
+            newNameRaw <- askSimple $ "New preset name (empty to keep '" ++ presetName p ++ "'): "
             let newName = if null newNameRaw then presetName p else newNameRaw
-            opts <- liftIO loadOptions
+            opts <- loadOptions
             finalFolders <- modifyFolders opts (presetStructure p)
-            isStatic <- yesNo "Save as static?"
-            let newPath = (if isStatic then presetsDir </> "scenarios" else presetsDir) </> map (\c -> if isSpace c then '-' else c) newName ++ ".json"
-            liftIO $ do
-              when (path /= newPath) $ deletePreset path
-              createDirectoryIfMissing True (takeDirectory newPath)
-              savePreset (p { presetName = newName, presetStructure = finalFolders }) newPath
-            outputStrLn $ "Saved to " ++ newPath
+            isStatic <- yesNoSimple "Save as static?"
+            let newPath = (if isStatic then presetsDir </> "scenarios" else presetsDir)
+                           </> map (\c -> if isSpace c then '-' else c) newName ++ ".json"
+            when (path /= newPath) $ deletePreset path
+            createDirectoryIfMissing True (takeDirectory newPath)
+            savePreset (p { presetName = newName, presetStructure = finalFolders }) newPath
+            putStrLn $ colorInfo ("Saved to " ++ newPath)
       _ -> return ()
 
-deletePresetMenu :: InputT IO ()
+
+deletePresetMenu :: IO ()
 deletePresetMenu = do
-  presets <- liftIO listPresets
-  if null presets then outputStrLn "No presets." else do
+  presets <- listPresets
+  if null presets then putStrLn "No presets." else do
     numbered $ map takeFileName presets
-    choice <- ask "Delete which number (0 to Cancel)? "
+    choice <- askSimple "Delete which number (0 to Cancel)? \n"
     case readMaybe choice :: Maybe Int of
       Just n | n >= 1 && n <= length presets -> do
         let path = presets !! (n-1)
-        ok <- yesNo $ "Delete " ++ takeFileName path ++ "?"
-        when ok $ liftIO (deletePreset path) >> outputStrLn "Deleted."
+        ok <- yesNoSimple $ "Delete " ++ takeFileName path ++ "?"
+        when ok $ deletePreset path >> putStrLn (colorInfo "Deleted.")
       _ -> return ()
 
-modifyFolders :: [FileOption] -> [FolderEntry] -> InputT IO [FolderEntry]
+
+modifyFolders :: [FileOption] -> [FolderEntry] -> IO [FolderEntry]
 modifyFolders opts folders = do
-  outputStrLn "\n-- Current Folders --"
-  if null folders then outputStrLn "  (No folders)" else numbered (map (\f -> folderPath f ++ " (" ++ show (sum $ map entryCount $ folderFiles f) ++ " files)") folders)
-  outputStrLn "\n  a) Add folder\n  d) Delete (e.g. d 1)\n  e) Edit (e.g. e 1)\n  b) Done"
-  raw <- ask "Action: "
+  putStrLn "\n-- Current Folders --"
+  if null folders
+    then putStrLn "  (No folders)"
+    else numbered (map (\f -> folderPath f ++ " (" ++ show (sum $ map entryCount $ folderFiles f) ++ " files)") folders)
+
+  putStrLn "\n  a) Add folder\n  d) Delete (e.g. d 1)\n  e) Edit (e.g. e 1)\n  b) Done"
+  raw <- askSimple "Action: \n"
   let (cmd, restStr) = break isSpace raw
       rest = parseInts restStr
   case cmd of
-    "a" -> ask "Folder path: " >>= \path -> if null path then modifyFolders opts folders else collectFiles opts [] >>= \fs -> modifyFolders opts (folders ++ [FolderEntry path fs])
+    "a" -> do
+      path <- askSimple "Folder path: \n"
+      if null path
+        then modifyFolders opts folders
+        else do
+          fs <- collectFiles opts []
+          modifyFolders opts (folders ++ [FolderEntry path fs])
     "d" | not (null rest) -> do
         let idx = head rest
         if idx >= 1 && idx <= length folders
-            then modifyFolders opts (take (idx - 1) folders ++ drop idx folders)
-            else modifyFolders opts folders
+          then modifyFolders opts (take (idx - 1) folders ++ drop idx folders)
+          else modifyFolders opts folders
     "e" | not (null rest) -> do
         let idx = head rest
         if idx >= 1 && idx <= length folders
-            then modifyFiles opts (folderPath (folders !! (idx-1))) (folderFiles (folders !! (idx-1))) >>= \fs -> modifyFolders opts (take (idx - 1) folders ++ [(folders !! (idx-1)) { folderFiles = fs }] ++ drop idx folders)
-            else modifyFolders opts folders
+          then do
+            fs <- modifyFiles opts (folderPath (folders !! (idx-1))) (folderFiles (folders !! (idx-1)))
+            modifyFolders opts (take (idx - 1) folders ++ [(folders !! (idx-1)) { folderFiles = fs }] ++ drop idx folders)
+          else modifyFolders opts folders
     "b" -> return folders
     _   -> modifyFolders opts folders
 
-modifyFiles :: [FileOption] -> String -> [FileEntry] -> InputT IO [FileEntry]
+modifyFiles :: [FileOption] -> String -> [FileEntry] -> IO [FileEntry]
 modifyFiles opts path files = do
-  outputStrLn $ "\n-- Editing Files in '" ++ path ++ "' --"
-  if null files then outputStrLn "  (No files)" else numbered (map (\f -> show (entryCount f) ++ "x " ++ entryOption f) files)
-  outputStrLn "\n  a) Add files\n  d) Delete (e.g. d 1)\n  b) Done"
-  raw <- ask "Action: "
+  putStrLn $ "\n-- Editing Files in '" ++ path ++ "' --"
+  if null files
+    then putStrLn "  (No files)"
+    else numbered (map (\f -> show (entryCount f) ++ "x " ++ entryOption f) files)
+
+  putStrLn "\n  a) Add files\n  d) Delete (e.g. d 1)\n  b) Done"
+  raw <- askSimple "Action: \n"
   let (cmd, restStr) = break isSpace raw
       rest = parseInts restStr
   case cmd of
@@ -220,100 +294,144 @@ modifyFiles opts path files = do
     "d" | not (null rest) -> do
         let idx = head rest
         if idx >= 1 && idx <= length files
-            then modifyFiles opts path (take (idx - 1) files ++ drop idx files)
-            else modifyFiles opts path files
+          then modifyFiles opts path (take (idx - 1) files ++ drop idx files)
+          else modifyFiles opts path files
     "b" -> return files
     _   -> modifyFiles opts path files
 
-collectFolders :: [FileOption] -> [FolderEntry] -> InputT IO [FolderEntry]
-collectFolders opts acc = ask "Folder path (empty to finish): " >>= \path -> if null path then return acc else collectFiles opts [] >>= \fs -> collectFolders opts (acc ++ [FolderEntry path fs])
 
-collectFiles :: [FileOption] -> [FileEntry] -> InputT IO [FileEntry]
+collectFolders :: [FileOption] -> [FolderEntry] -> IO [FolderEntry]
+collectFolders opts acc = do
+  path <- askSimple "Folder path (empty to finish): \n"
+  if null path
+    then return acc
+    else do
+      fs <- collectFiles opts []
+      collectFolders opts (acc ++ [FolderEntry path fs])
+
+collectFiles :: [FileOption] -> [FileEntry] -> IO [FileEntry]
 collectFiles opts acc = do
   numbered (map (\o -> optionName o ++ optionExt o) opts)
-  choice <- ask "Select option (0 to Done): "
+  choice <- askSimple "Select option (0 to Done): \n"
   case readMaybe choice :: Maybe Int of
     Just 0 -> return acc
     Just n | n >= 1 && n <= length opts -> do
-      cstr <- ask $ "How many " ++ optionName (opts !! (n-1)) ++ " files? "
+      cstr <- askSimple $ "How many " ++ optionName (opts !! (n-1)) ++ " files? \n"
       case readMaybe cstr :: Maybe Int of
         Just c | c >= 1 -> collectFiles opts (acc ++ [FileEntry (optionName (opts !! (n-1))) c])
-        _ -> outputStrLn "Need >= 1." >> collectFiles opts acc
+        _ -> putStrLn (colorWarn "Need >= 1.") >> collectFiles opts acc
     _ -> collectFiles opts acc
 
-manageOptionsMenu :: InputT IO ()
+
+manageOptionsMenu :: IO ()
 manageOptionsMenu = do
-  uOpts <- liftIO loadUserOptions
-  sOpts <- liftIO loadStaticOptions
+  uOpts <- loadUserOptions
+  sOpts <- loadStaticOptions
   let refs = map (\o -> (o, True)) sOpts ++ map (\o -> (o, False)) uOpts
-  outputStrLn "\n-- File Options --"
-  if null refs then outputStrLn "  (none yet)" else numbered (map (\(o, isS) -> (if isS then "[Static] " else "[User]   ") ++ optionName o ++ optionExt o) refs)
-  outputStrLn "\n  1) Add new\n  2) Edit/Manage variants\n  3) Delete\n  0) Back"
-  ask "Choice: " >>= \case
+  putStrLn "\n-- File Options --"
+  if null refs
+    then putStrLn "  (none yet)"
+    else numbered (map (\(o, isS) -> (if isS then "[Static] " else "[User]   ") ++ optionName o ++ optionExt o) refs)
+
+  putStrLn "\n  1) Add new\n  2) Edit/Manage variants\n  3) Delete\n  0) Back"
+  askSimple "Choice: \n" >>= \case
     "1" -> addOptionMenu uOpts sOpts >> manageOptionsMenu
     "2" -> editOptionMenu refs uOpts sOpts >> manageOptionsMenu
     "3" -> deleteOptionMenu refs uOpts sOpts >> manageOptionsMenu
     "0" -> return ()
-    _   -> outputStrLn "Invalid." >> manageOptionsMenu
+    _   -> putStrLn "Invalid." >> manageOptionsMenu
 
-addOptionMenu :: [FileOption] -> [FileOption] -> InputT IO ()
+
+addOptionMenu :: [FileOption] -> [FileOption] -> IO ()
 addOptionMenu uOpts sOpts = do
-  name <- ask "\nBase name: "
+  name <- askSimple "\nBase name: \n"
   if null name then return () else do
-    ext <- normalizeExt <$> ask "Extension (e.g. .txt): "
+    ext <- normalizeExt <$> askSimple "Extension (e.g. .txt): \n"
     let opt = FileOption name ext (autoVariants name)
-    isStatic <- yesNo "Save as static?"
-    liftIO $ if isStatic then saveStaticOptions (upsertOption opt sOpts) else saveUserOptions (upsertOption opt uOpts)
-    outputStrLn "Option created."
+    isStatic <- yesNoSimple "Save as static?"
+    if isStatic
+      then saveStaticOptions (upsertOption opt sOpts)
+      else saveUserOptions (upsertOption opt uOpts)
+    putStrLn (colorInfo "Option created.")
 
-editOptionMenu :: [(FileOption, Bool)] -> [FileOption] -> [FileOption] -> InputT IO ()
+
+editOptionMenu :: [(FileOption, Bool)] -> [FileOption] -> [FileOption] -> IO ()
 editOptionMenu [] _ _ = return ()
 editOptionMenu refs uOpts sOpts = do
-  choice <- ask "Edit which number? "
+  choice <- askSimple "Edit which number? \n"
   case readMaybe choice :: Maybe Int of
     Just n | n >= 1 && n <= length refs -> do
       let (opt, isStatic) = refs !! (n-1)
       updatedOpt <- manageVariantsMenu opt
-      toggle <- yesNo $ "Toggle status? (Currently " ++ (if isStatic then "[Static]" else "[User]") ++ ")"
+      toggle <- yesNoSimple $ "Toggle status? (Currently " ++ (if isStatic then "[Static]" else "[User]") ++ ")"
       let finalStatic = if toggle then not isStatic else isStatic
           cleanU = removeOption (optionName opt) uOpts
           cleanS = removeOption (optionName opt) sOpts
-      liftIO $ if finalStatic then saveUserOptions cleanU >> saveStaticOptions (upsertOption updatedOpt cleanS) else saveStaticOptions cleanS >> saveUserOptions (upsertOption updatedOpt cleanU)
+      if finalStatic
+        then do
+          saveUserOptions cleanU
+          saveStaticOptions (upsertOption updatedOpt cleanS)
+        else do
+          saveStaticOptions cleanS
+          saveUserOptions (upsertOption updatedOpt cleanU)
+      putStrLn (colorInfo "Updated.")
     _ -> return ()
 
-deleteOptionMenu :: [(FileOption, Bool)] -> [FileOption] -> [FileOption] -> InputT IO ()
+
+deleteOptionMenu :: [(FileOption, Bool)] -> [FileOption] -> [FileOption] -> IO ()
 deleteOptionMenu [] _ _ = return ()
 deleteOptionMenu refs uOpts sOpts = do
-  choice <- ask "Delete which number? "
+  choice <- askSimple "Delete which number? \n"
   case readMaybe choice :: Maybe Int of
     Just n | n >= 1 && n <= length refs -> do
       let (opt, isStatic) = refs !! (n-1)
-      ok <- yesNo $ "Delete '" ++ optionName opt ++ "'?"
-      when ok $ liftIO $ if isStatic then saveStaticOptions (removeOption (optionName opt) sOpts) else saveUserOptions (removeOption (optionName opt) uOpts)
+      ok <- yesNoSimple $ "Delete '" ++ optionName opt ++ "'?"
+      when ok $
+        if isStatic
+          then saveStaticOptions (removeOption (optionName opt) sOpts)
+          else saveUserOptions (removeOption (optionName opt) uOpts)
+      putStrLn (colorInfo "Deleted.")
     _ -> return ()
 
-manageVariantsMenu :: FileOption -> InputT IO FileOption
+
+
+manageVariantsMenu :: FileOption -> IO FileOption
 manageVariantsMenu opt = do
   let vs = variants opt
-  outputStrLn $ "\n-- Variants for " ++ optionName opt ++ optionExt opt ++ " --"
-  forM_ (zip [1 :: Int ..] vs) $ \(i, v) -> outputStrLn $ "  " ++ show i ++ ") " ++ (if variantEnabled v then "[ON] " else "[OFF]") ++ " " ++ variantLabel v
-  outputStrLn "\n  a) Add custom\n  r) Remove (e.g. r 1)\n  e) Enable (e.g. e 1)\n  d) Disable (e.g. d 1)\n  b) Done"
-  raw <- ask "Action: "
+  putStrLn $ "\n-- Variants for " ++ optionName opt ++ optionExt opt ++ " --"
+  forM_ (zip [1 :: Int ..] vs) $ \(i, v) ->
+    putStrLn $ "  " ++ show i ++ ") " ++ (if variantEnabled v then "[ON] " else "[OFF]") ++ " " ++ variantLabel v
+
+  putStrLn "\n  a) Add custom\n  r) Remove (e.g. r 1)\n  e) Enable (e.g. e 1)\n  d) Disable (e.g. d 1)\n  b) Done"
+  raw <- askSimple "Action: \n"
   let (cmd, restStr) = break isSpace raw
       rest = parseInts restStr
+
   case cmd of
-    "a" -> ask "Custom base name: " >>= \b -> if null b then manageVariantsMenu opt else manageVariantsMenu (opt { variants = vs ++ [Variant ("custom: " ++ b) b (b ++ "_{N}") True] })
-    "r" | not (null rest) -> manageVariantsMenu (opt { variants = filter (\v -> variantLabel v `notElem` map variantLabel (selectByIndices rest vs)) vs })
-    "e" | not (null rest) -> manageVariantsMenu (opt { variants = [ if i `elem` rest then v { variantEnabled = True } else v | (i, v) <- zip [1..] vs ] })
-    "d" | not (null rest) -> manageVariantsMenu (opt { variants = [ if i `elem` rest then v { variantEnabled = False } else v | (i, v) <- zip [1..] vs ] })
+    "a" -> do
+      b <- askSimple "Custom base name: \n"
+      if null b
+        then manageVariantsMenu opt
+        else manageVariantsMenu (opt { variants = vs ++ [Variant ("custom: " ++ b) b (b ++ "_{N}") True] })
+
+    "r" | not (null rest) ->
+      manageVariantsMenu (opt { variants = filter (\v -> variantLabel v `notElem` map variantLabel (selectByIndices rest vs)) vs })
+
+    "e" | not (null rest) ->
+      manageVariantsMenu (opt { variants = [ if i `elem` rest then v { variantEnabled = True } else v | (i, v) <- zip [1..] vs ] })
+
+    "d" | not (null rest) ->
+      manageVariantsMenu (opt { variants = [ if i `elem` rest then v { variantEnabled = False } else v | (i, v) <- zip [1..] vs ] })
+
     "b" -> return opt
     _   -> manageVariantsMenu opt
 
-runOrganizerMenu :: InputT IO ()
+
+runOrganizerMenu :: IO ()
 runOrganizerMenu = do
-  outputStrLn "\n-- Run Organizer --\n  1) Dry-run scan\n  2) Dedupe\n  3) Full Organize\n  4) Standardize Names\n  0) Back"
-  ask "Choice: " >>= \case
-    "1" -> withTestRoot (liftIO runDryScan) >> runOrganizerMenu
+  putStrLn "\n-- Run Organizer --\n  1) Dry-run scan\n  2) Dedupe\n  3) Full Organize\n  4) Standardize Names\n  0) Back"
+  askSimple "Choice: \n" >>= \case
+    "1" -> withTestRoot runDryScan >> runOrganizerMenu
     "2" -> withTestRoot runDedupeMenu >> runOrganizerMenu
     "3" -> withTestRoot pickRulesAndOrganize >> runOrganizerMenu
     "4" -> withTestRoot standardizeMenu >> runOrganizerMenu
@@ -357,32 +475,34 @@ runFullOrganize rules = withRunLog testRoot $ \h -> do
 
 standardizeMenu :: InputT IO ()
 standardizeMenu = do
-  outputStrLn "\n-- Standardize Names --\n  1) Dry run (preview renames)\n  2) Apply standardization\n  3) Rule Builder\n  4) Manage Rules\n  0) Back"
-  ask "Choice: " >>= \case
-    "1" -> liftIO (runStandardize True)  >> standardizeMenu
-    "2" -> liftIO (runStandardize False) >> standardizeMenu
+  putStrLn "\n-- Standardize Names --\n  1) Dry run (preview renames)\n  2) Apply standardization\n  3) Rule Builder\n  4) Manage Rules\n  0) Back"
+  askSimple "Choice: \n" >>= \case
+    "1" -> runStandardize True  >> standardizeMenu
+    "2" -> runStandardize False >> standardizeMenu
     "3" -> ruleBuilderMenu >> standardizeMenu
     "4" -> manageRulesMenu >> standardizeMenu
     "0" -> return ()
     _   -> standardizeMenu
 
-ruleBuilderMenu :: InputT IO ()
+
+
+ruleBuilderMenu :: IO ()
 ruleBuilderMenu = do
-  files <- liftIO $ withRunLog testRoot $ \h -> listFilesRecursive h testRoot
+  files <- withRunLog testRoot $ \h -> listFilesRecursive h testRoot
   let withExt = filter (\f -> takeExtension f /= "") files
   if null withExt
-    then outputStrLn "  No files with extensions found in test-root."
+    then putStrLn "  No files with extensions found in test-root."
     else do
-      outputStrLn "\n-- Rule Builder: pick a file to model --"
+      putStrLn "\n-- Rule Builder: pick a file to model --"
       numbered withExt
-      outputStrLn "  0) Cancel"
-      choice <- ask "Choice: "
+      putStrLn "  0) Cancel"
+      choice <- askSimple "Choice: \n"
       case readMaybe choice :: Maybe Int of
         Just 0 -> return ()
         Just n | n >= 1 && n <= length withExt -> buildRuleFor (withExt !! (n - 1))
-        _ -> outputStrLn "  Invalid choice."
+        _ -> putStrLn "  Invalid choice."
 
-buildRuleFor :: FilePath -> InputT IO ()
+buildRuleFor :: FilePath -> IO ()
 buildRuleFor fp = do
   let file   = takeFileName fp
       base   = dropExtension file
@@ -390,126 +510,147 @@ buildRuleFor fp = do
       shape  = shapeOf tokens
       delim  = dominantDelim base
 
-  outputStrLn $ "\n  File:      " ++ file
-  outputStrLn $ "  Tokens:    " ++ intercalate "  " [ show i ++ ":" ++ showTok t | (i, t) <- zip [1 :: Int ..] tokens ]
-  outputStrLn $ "  Shape:     " ++ unwords shape
-  outputStrLn $ "  Delimiter: " ++ maybe "(none detected)" (:[]) delim
+  putStrLn $ "\n  File:      " ++ file
+  putStrLn $ "  Tokens:    " ++ intercalate "  " [ show i ++ ":" ++ showTok t | (i, t) <- zip [1 :: Int ..] tokens ]
+  putStrLn $ "  Shape:     " ++ unwords shape
+  putStrLn $ "  Delimiter: " ++ maybe "(none detected)" (:[]) delim
 
-  cfg <- liftIO loadNameMapConfig
-  rName <- ask "\nRule name (unique identifier, empty to cancel): "
-  if null rName then outputStrLn "  Cancelled." else do
-    case find (\r -> ruleName r == rName) (shapeRules cfg) of
-      Just _  -> outputStrLn $ "  Note: existing rule '" ++ rName ++ "' will be overwritten."
-      Nothing -> outputStrLn $ "  Creating new rule '" ++ rName ++ "'."
+  cfg <- loadNameMapConfig
+  rName <- askSimple "\nRule name (unique identifier, empty to cancel): \n"
+  if null rName
+    then putStrLn "  Cancelled."
+    else do
+      case find (\r -> ruleName r == rName) (shapeRules cfg) of
+        Just _  -> putStrLn $ "  Note: existing rule '" ++ rName ++ "' will be overwritten."
+        Nothing -> putStrLn $ "  Creating new rule '" ++ rName ++ "'."
 
-    outputStrLn "\n-- Select or create a naming standard --"
-    let stds = standards cfg
-    if null stds then outputStrLn "  (no standards saved yet)" else numbered [ stdId s ++ "  ->  " ++ stdPattern s | s <- stds ]
-    outputStrLn "  0) Create new standard"
-    stdChoice <- ask "Choice: "
-    mStd <- case readMaybe stdChoice :: Maybe Int of
-      Just 0                               -> createStandardMenu cfg
-      Just m | m >= 1 && m <= length stds  -> return (Just (stds !! (m - 1)))
-      _                                    -> outputStrLn "  Invalid, cancelled." >> return Nothing
+      putStrLn "\n-- Select or create a naming standard --"
+      let stds = standards cfg
+      if null stds
+        then putStrLn "  (no standards saved yet)"
+        else numbered [ stdId s ++ "  ->  " ++ stdPattern s | s <- stds ]
 
-    case mStd of
-      Nothing  -> return ()
-      Just std -> do
-        let patVars = extractPatternVars (stdPattern std)
-        outputStrLn $ "\n  Standard:  " ++ stdId std
-        outputStrLn $ "  Pattern:   " ++ stdPattern std
-        outputStrLn $ "  Variables: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") patVars)
+      putStrLn "  0) Create new standard"
+      stdChoice <- askSimple "Choice: \n"
+      mStd <- case readMaybe stdChoice :: Maybe Int of
+        Just 0 -> createStandardMenu cfg
+        Just m | m >= 1 && m <= length stds -> return (Just (stds !! (m - 1)))
+        _ -> putStrLn "  Invalid, cancelled." >> return Nothing
 
-        outputStrLn "\n-- Map token positions to pattern variables --"
-        outputStrLn "  Enter a variable name, 'x' to skip, '!' to abort."
-        tmap <- mapTokens 1 tokens []
+      case mStd of
+        Nothing  -> return ()
+        Just std -> do
+          let patVars = extractPatternVars (stdPattern std)
+          putStrLn $ "\n  Standard:  " ++ stdId std
+          putStrLn $ "  Pattern:   " ++ stdPattern std
+          putStrLn $ "  Variables: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") patVars)
 
-        when (not (null tmap)) $ do
-          let mappedVars = map snd tmap
-              dups = nub [ v | v <- mappedVars, length (filter (== v) mappedVars) > 1 ]
-          when (not (null dups)) $
-            outputStrLn $ "  Warning: variable(s) mapped to multiple tokens: " ++ intercalate ", " dups
+          putStrLn "\n-- Map token positions to pattern variables --"
+          putStrLn "  Enter a variable name, 'x' to skip, '!' to abort."
+          tmap <- mapTokens 1 tokens []
 
-          let unmapped = filter (`notElem` mappedVars) patVars
-          when (not (null unmapped)) $
-            outputStrLn $ "  Warning: pattern variable(s) with no token assigned: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") unmapped)
+          when (not (null tmap)) $ do
+            let mappedVars = map snd tmap
+                dups = nub [ v | v <- mappedVars, length (filter (== v) mappedVars) > 1 ]
+            when (not (null dups)) $
+              putStrLn $ "  Warning: variable(s) mapped to multiple tokens: " ++ intercalate ", " dups
 
-          outputStrLn "\n-- Translation dictionaries --"
-          outputStrLn "  For each mapped token, optionally provide a translation."
-          outputStrLn "  (Enter=keep, !=abort, *=global map, @=strict anchor e.g. @357)"
-          (finalDict, aborted) <- buildDicts tmap tokens M.empty
+            let unmapped = filter (`notElem` mappedVars) patVars
+            when (not (null unmapped)) $
+              putStrLn $ "  Warning: pattern variable(s) with no token assigned: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") unmapped)
 
-          when (not aborted) $ do
-            cfg' <- liftIO loadNameMapConfig
-            let newRule = ShapeRule rName shape delim tmap (stdId std) finalDict
-                others  = filter (\r -> ruleName r /= rName) (shapeRules cfg')
-            liftIO $ saveNameMapConfig (cfg' { shapeRules = others ++ [newRule] })
-            outputStrLn $ "\n  Rule '" ++ rName ++ "' saved."
+            putStrLn "\n-- Translation dictionaries --"
+            putStrLn "  For each mapped token, optionally provide a translation."
+            putStrLn "  (Enter=keep, !=abort, *=global map, @=anchor)"
+            (finalDict, aborted) <- buildDicts tmap tokens M.empty
 
-createStandardMenu :: NameMapConfig -> InputT IO (Maybe NameStandard)
+            when (not aborted) $ do
+              cfg' <- loadNameMapConfig
+              let newRule = ShapeRule rName shape delim tmap (stdId std) finalDict
+                  others  = filter (\r -> ruleName r /= rName) (shapeRules cfg')
+              saveNameMapConfig (cfg' { shapeRules = others ++ [newRule] })
+              putStrLn $ "\n  Rule '" ++ rName ++ "' saved."
+
+
+createStandardMenu :: NameMapConfig -> IO (Maybe NameStandard)
 createStandardMenu cfg = do
-  outputStrLn "\n-- Create New Standard --"
-  sid <- ask "Standard ID (e.g. univ-assignment): "
-  if null sid then return Nothing else do
-    pat <- ask "Pattern   (e.g. {class}-{number}_{type} {counter}): "
-    if null pat then return Nothing else do
-      let vars = extractPatternVars pat
-      if null vars
-        then outputStrLn "  Warning: no {variables} found in pattern." >> yesNo "  Save anyway?" >>= \ok -> if ok then persist sid pat else return Nothing
-        else outputStrLn ("  Variables detected: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") vars)) >> yesNo "  Save this standard?" >>= \ok -> if ok then persist sid pat else return Nothing
+  putStrLn "\n-- Create New Standard --"
+  sid <- askSimple "Standard ID (e.g. univ-assignment): \n"
+  if null sid
+    then return Nothing
+    else do
+      pat <- askSimple "Pattern   (e.g. {class}-{number}_{type} {counter}): \n"
+      if null pat
+        then return Nothing
+        else do
+          let vars = extractPatternVars pat
+          if null vars
+            then do
+              putStrLn "  Warning: no {variables} found in pattern."
+              ok <- yesNoSimple "  Save anyway?"
+              if ok then persist sid pat else return Nothing
+            else do
+              putStrLn $ "  Variables detected: " ++ intercalate ", " (map (\v -> "{" ++ v ++ "}") vars)
+              ok <- yesNoSimple "  Save this standard?"
+              if ok then persist sid pat else return Nothing
   where
     persist sid pat = do
       let std = NameStandard sid pat
-      liftIO $ saveNameMapConfig (cfg { standards = standards cfg ++ [std] })
-      outputStrLn $ "  Standard '" ++ sid ++ "' saved."
+      saveNameMapConfig (cfg { standards = standards cfg ++ [std] })
+      putStrLn $ "  Standard '" ++ sid ++ "' saved."
       return (Just std)
 
 -- | Manage standardization shape rules (used within Standardize Names menu).
 manageRulesMenu :: InputT IO ()
 manageRulesMenu = do
-  cfg <- liftIO loadNameMapConfig
+  cfg <- loadNameMapConfig
   let rules = shapeRules cfg
-  outputStrLn "\n-- Manage Rules --"
+  putStrLn "\n-- Manage Rules --"
   if null rules
-    then outputStrLn "  (no rules saved yet)"
+    then putStrLn "  (no rules saved yet)"
     else forM_ (zip [1 :: Int ..] rules) $ \(i, r) -> do
-      outputStrLn $ "\n  " ++ show i ++ ") " ++ ruleName r
-      outputStrLn $ "     Shape:    " ++ unwords (shapeTokens r)
-      outputStrLn $ "     Delim:    " ++ maybe "(any)" (:[]) (ruleDelim r)
-      outputStrLn $ "     Standard: " ++ targetStd r
-      outputStrLn $ "     Tokens:   " ++ intercalate ", " [ show pos ++ "->{" ++ v ++ "}" | (pos, v) <- tokenMap r ]
-  outputStrLn "\n  d <n>) Delete a rule\n  0) Back"
-  raw <- ask "Action: "
+      putStrLn $ "\n  " ++ show i ++ ") " ++ ruleName r
+      putStrLn $ "     Shape:    " ++ unwords (shapeTokens r)
+      putStrLn $ "     Delim:    " ++ maybe "(any)" (:[]) (ruleDelim r)
+      putStrLn $ "     Standard: " ++ targetStd r
+      putStrLn $ "     Tokens:   " ++ intercalate ", " [ show pos ++ "->{" ++ v ++ "}" | (pos, v) <- tokenMap r ]
+
+  putStrLn "\n  d <n>) Delete a rule\n  0) Back"
+  raw <- askSimple "Action: \n"
   let (cmd, restStr) = break isSpace raw
       idxs = parseInts restStr
+
   case cmd of
     "d" | not (null idxs) -> do
       let idx = head idxs
       if idx >= 1 && idx <= length rules
         then do
           let r = rules !! (idx - 1)
-          ok <- yesNo $ "Delete rule '" ++ ruleName r ++ "'?"
+          ok <- yesNoSimple $ "Delete rule '" ++ ruleName r ++ "'?"
           when ok $ do
-            liftIO $ saveNameMapConfig (cfg { shapeRules = filter (\x -> ruleName x /= ruleName r) rules })
-            outputStrLn "  Deleted."
+            saveNameMapConfig (cfg { shapeRules = filter (\x -> ruleName x /= ruleName r) rules })
+            putStrLn "  Deleted."
           manageRulesMenu
-        else outputStrLn "  Index out of range." >> manageRulesMenu
+        else putStrLn "  Index out of range." >> manageRulesMenu
     "0" -> return ()
     _   -> manageRulesMenu
 
-mapTokens :: Int -> [Token] -> [(Int, String)] -> InputT IO [(Int, String)]
+
+mapTokens :: Int -> [Token] -> [(Int, String)] -> IO [(Int, String)]
 mapTokens idx tokens acc
   | idx > length tokens = return acc
   | otherwise = do
       let tok = tokens !! (idx - 1)
-      res <- ask $ "  Token " ++ show idx ++ " " ++ showTok tok ++ " -> variable (x=skip, !=abort): "
+      res <- askSimple $ "  Token " ++ show idx ++ " " ++ showTok tok ++ " -> variable (x=skip, !=abort): \n"
       case res of
         "!" -> return []
         "x" -> mapTokens (idx + 1) tokens acc
         ""  -> mapTokens idx tokens acc
         var -> mapTokens (idx + 1) tokens (acc ++ [(idx, var)])
 
-buildDicts :: [(Int, String)] -> [Token] -> M.Map String (M.Map String String) -> InputT IO (M.Map String (M.Map String String), Bool)
+
+buildDicts :: [(Int, String)] -> [Token] -> M.Map String (M.Map String String)
+           -> IO (M.Map String (M.Map String String), Bool)
 buildDicts [] _ acc = return (acc, False)
 buildDicts ((idx, var):ts) tokens acc = do
   if map toLower var == "counter"
@@ -517,7 +658,7 @@ buildDicts ((idx, var):ts) tokens acc = do
     else do
       let tok = tokens !! (idx - 1)
           raw = case tok of Alpha n _ -> n; Num num -> show num
-      res <- ask $ "  Translate '" ++ raw ++ "' for {" ++ var ++ "}? (Enter=keep, !=abort, *=global, @=anchor): "
+      res <- askSimple $ "  Translate '" ++ raw ++ "' for {" ++ var ++ "}? (Enter=keep, !=abort, *=global, @=anchor): \n"
       case res of
         "!" -> return (acc, True)
         ""  -> buildDicts ts tokens acc
@@ -525,6 +666,7 @@ buildDicts ((idx, var):ts) tokens acc = do
           let innerMap = M.findWithDefault M.empty var acc
               newInner = M.insert raw trans innerMap
           buildDicts ts tokens (M.insert var newInner acc)
+
 
 runStandardize :: Bool -> IO ()
 runStandardize isDryRun = withRunLog testRoot $ \h -> do
@@ -535,13 +677,26 @@ runStandardize isDryRun = withRunLog testRoot $ \h -> do
   _ <- runStandardizeBatch h isDryRun cfg files
   putStrLn "Done."
 
+
+runFullOrganize :: IO ()
+runFullOrganize = withRunLog testRoot $ \h -> do
+  files <- listFilesRecursive h testRoot
+  if null files
+    then putStrLn "  test-root is empty."
+    else do
+      putStrLn $ "\nOrganizing " ++ show (length files) ++ " file(s)..."
+      organizeByType testRoot h files
+      putStrLn "Organization complete."
+
 runDryScan :: IO ()
 runDryScan = withRunLog testRoot $ \h -> do
   files <- listFilesRecursive h testRoot
-  if null files then putStrLn "  test-root is empty." else do
-    putStrLn $ "\nScanning " ++ show (length files) ++ " file(s):\n"
-    mapM_ showFileInfo files
-    putStrLn ""
+  if null files
+    then putStrLn "  test-root is empty."
+    else do
+      putStrLn $ "\nScanning " ++ show (length files) ++ " file(s):\n"
+      mapM_ showFileInfo files
+      putStrLn ""
 
 showFileInfo :: FilePath -> IO ()
 showFileInfo f = do
@@ -552,11 +707,15 @@ showFileInfo f = do
     (Left e, _)        -> putStrLn $ "  " ++ f ++ " | detect err: " ++ show e
     (_, Left e)        -> putStrLn $ "  " ++ f ++ " | hash err: " ++ show e
 
-runDedupeMenu :: InputT IO ()
+
+runDedupeMenu :: IO ()
 runDedupeMenu = do
-  removeOrig <- yesNo "\nDelete originals after moving?"
-  ok <- yesNo "Proceed?"
-  when ok $ liftIO (withRunLog testRoot $ \h -> dedupe testRoot removeOrig h) >> outputStrLn "Dedupe complete."
+  removeOrig <- yesNoSimple "\nDelete originals after moving?"
+  ok <- yesNoSimple "Proceed?"
+  when ok $ do
+    withRunLog testRoot $ \h -> dedupe testRoot removeOrig h
+    putStrLn (colorInfo "Dedupe complete.")
+
 
 -- ─── Sort Rules ─────────────────────────────────────────────────────────────
 
@@ -622,31 +781,72 @@ deleteRulePresetMenu = do
 
 runTestsMenu :: InputT IO ()
 runTestsMenu = do
-  scenarios <- liftIO allScenarios
-  outputStrLn $ "\n-- Run Tests -- (" ++ show (length allTests) ++ " tests, " ++ show (length scenarios) ++ " scenarios)"
-  outputStrLn "  1) Run all\n  2) Run one\n  3) Run by scenario\n  4) List tests\n  5) List scenarios\n  0) Back"
-  ask "Choice: " >>= \case
-    "1" -> liftIO (runAllTests allTests) >>= printOutcomes >> runTestsMenu
-    "2" -> numbered (map testName allTests) >> ask "Choice: " >>= \c -> case readMaybe c :: Maybe Int of
-             Just n | n >= 1 && n <= length allTests -> liftIO (runSpec (allTests !! (n-1))) >>= printOutcomes >> runTestsMenu
-             _ -> runTestsMenu
-    "3" -> numbered (map scenarioName scenarios) >> ask "Choice: " >>= \c -> case readMaybe c :: Maybe Int of
-             Just n | n >= 1 && n <= length scenarios -> liftIO (runByScenario (scenarioName (scenarios !! (n-1))) allTests) >>= printOutcomes >> runTestsMenu
-             _ -> runTestsMenu
-    "4" -> forM_ allTests (\s -> outputStrLn $ "  " ++ testName s) >> runTestsMenu
-    "5" -> forM_ scenarios (\s -> outputStrLn $ "  " ++ scenarioName s ++ "  — " ++ scenarioDesc s) >> runTestsMenu
+  scenarios <- allScenarios
+  putStrLn $ "\n-- Run Tests -- (" ++ show (length allTests) ++ " tests, " ++ show (length scenarios) ++ " scenarios)"
+  putStrLn "  1) Run all"
+  putStrLn "  2) Run one"
+  putStrLn "  3) Run by scenario"
+  putStrLn "  4) List tests"
+  putStrLn "  5) List scenarios"
+  putStrLn "  0) Back"
+
+  askSimple "Choice: \n" >>= \case
+    "1" -> runAllTests allTests >>= printOutcomes >> runTestsMenu
+
+    "2" -> do
+      numbered (map testName allTests)
+      c <- askSimple "Choice: \n"
+      case readMaybe c :: Maybe Int of
+        Just n | n >= 1 && n <= length allTests -> do
+          outcomes <- runSpec (allTests !! (n-1))
+          printOutcomes outcomes
+          runTestsMenu
+        _ -> runTestsMenu
+
+    "3" -> do
+      numbered (map scenarioName scenarios)
+      c <- askSimple "Choice: \n"
+      case readMaybe c :: Maybe Int of
+        Just n | n >= 1 && n <= length scenarios -> do
+          let sname = scenarioName (scenarios !! (n-1))
+          outcomes <- runByScenario sname allTests
+          printOutcomes outcomes
+          runTestsMenu
+        _ -> runTestsMenu
+
+    "4" -> do
+      forM_ allTests (\t -> putStrLn $ "  " ++ testName t)
+      runTestsMenu
+
+    "5" -> do
+      forM_ scenarios (\s ->
+        putStrLn $ "  " ++ scenarioName s ++ "  — " ++ scenarioDesc s)
+      runTestsMenu
+
     "0" -> return ()
     _   -> runTestsMenu
 
-printOutcomes :: [TestOutcome] -> InputT IO ()
-printOutcomes [] = outputStrLn "  (no outcomes)"
+
+
+printOutcomes :: [TestOutcome] -> IO ()
+printOutcomes [] = putStrLn "  (no outcomes)"
 printOutcomes outcomes = do
-  outputStrLn (replicate 60 '-')
+  putStrLn (replicate 60 '-')
   forM_ outcomes $ \o -> do
-    outputStrLn $ (if outResult o == Pass then "PASS" else "FAIL") ++ " [" ++ outScenario o ++ "] " ++ outTestName o
+    let status = case outResult o of
+                   Pass     -> colorPass "PASS"
+                   Fail _   -> colorFail "FAIL"
+    putStrLn $ status ++ " [" ++ outScenario o ++ "] " ++ outTestName o
     case outResult o of
-      Fail r -> outputStrLn $ "       -> " ++ r
-      Pass   -> return ()
-  outputStrLn (replicate 60 '-')
-  let (p, f, t) = (passCount outcomes, failCount outcomes, length outcomes)
-  outputStrLn $ "  Passed: " ++ show p ++ " / " ++ show t ++ (if f > 0 then " (" ++ show f ++ " failed)" else " OK")
+      Fail msg -> putStrLn $ "       -> " ++ msg
+      Pass     -> return ()
+  putStrLn (replicate 60 '-')
+  let p = passCount outcomes
+      f = failCount outcomes
+      t = length outcomes
+  let summary =
+        if f == 0
+          then colorPass ("  Passed: " ++ show p ++ " / " ++ show t ++ " OK")
+          else colorFail ("  Passed: " ++ show p ++ " / " ++ show t ++ " (" ++ show f ++ " failed)")
+  putStrLn summary
+
