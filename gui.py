@@ -48,10 +48,7 @@ gui_process = None
 current_input = ""
 command_history = []
 history_index = None
-<<<<<<< Updated upstream
-=======
 current_view = "logs"  
->>>>>>> Stashed changes
 
 ANSI_FG_COLORS = {
     "30": "#000000",
@@ -64,22 +61,6 @@ ANSI_FG_COLORS = {
     "37": "#d6cff0",
 }
 
-<<<<<<< Updated upstream
-def insert_ansi(widget, text):
-    i = 0
-    current_tags = []
-    n = len(text)
-    while i < n:
-        ch = text[i]
-        if ch == "\x1b" and i + 1 < n and text[i + 1] == "[":
-            j = i + 2
-            while j < n and text[j] != "m":
-                j += 1
-            if j >= n:
-                break
-            seq = text[i + 2:j]
-            codes = seq.split(";") if seq else []
-=======
 
 ansi_buffer = ""
 
@@ -113,7 +94,6 @@ def insert_ansi(widget, text):
             seq = text[i + 2:j]
             codes = seq.split(";") if seq else []
 
->>>>>>> Stashed changes
             if "0" in codes or not codes:
                 current_tags = []
             else:
@@ -124,15 +104,6 @@ def insert_ansi(widget, text):
                     elif code == "1":
                         if "ansi_bold" not in current_tags:
                             current_tags.append("ansi_bold")
-<<<<<<< Updated upstream
-            i = j + 1
-        else:
-            if current_tags:
-                widget.insert(tk.END, ch, tuple(current_tags))
-            else:
-                widget.insert(tk.END, ch)
-            i += 1
-=======
 
             i = j + 1
             continue
@@ -157,7 +128,6 @@ def _clean_text(text: str) -> str:
     clean = text.replace("\r", "\n")
     clean = "\n".join([line for line in clean.split("\n") if line.strip() != ""])
     return clean
->>>>>>> Stashed changes
 
 def log(text, tag=None):
     clean = strip_ansi(_clean_text(text))
@@ -175,15 +145,10 @@ def log(text, tag=None):
 
 
 def cli_log(text):
-<<<<<<< Updated upstream
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    insert_ansi(cli_terminal, text)
-=======
     clean = _clean_text(text)
     if not clean:
         return
     insert_ansi(cli_terminal, clean + "\n")
->>>>>>> Stashed changes
     cli_terminal.see(tk.END)
 
 
@@ -192,18 +157,11 @@ def set_status(text):
     lower = text.lower()
     if "error" in lower or "fail" in lower:
         status_bar.config(fg=current_theme["ERROR"])
-<<<<<<< Updated upstream
-    elif "running" in lower or "sorting" in lower or "scanning" in lower or "undo" in lower or "cleaning" in lower or "reset" in lower:
-        status_bar.config(fg=current_theme["PROGRESS"])
-    else:
-        status_bar.config(fg=current_theme["ACCENT2"])
-=======
     elif any(k in lower for k in ["running", "sorting", "scanning", "undo", "cleaning", "reset"]):
         status_bar.config(fg=current_theme["PROGRESS"])
     else:
         status_bar.config(fg=current_theme["ACCENT2"])
 
->>>>>>> Stashed changes
 
 def update_progress_from_line(line):
     try:
@@ -312,9 +270,6 @@ def apply_theme():
     style.configure("Thin.Horizontal.TProgressbar",
                     troughcolor=theme["PANEL"],
                     background=theme["PROGRESS"])
-    for code, color in ANSI_FG_COLORS.items():
-        cli_terminal.tag_config(f"ansi_fg_{code}", foreground=color)
-    cli_terminal.tag_config("ansi_bold", font=("Courier New", 10, "bold"))
 
     style.configure("Treeview",
                     background=theme["PANEL"],
@@ -676,16 +631,11 @@ def _do_set_mode_gui():
     gui_container.pack(fill=tk.BOTH, expand=True)
     apply_theme()
     set_status("Ready")
-<<<<<<< Updated upstream
-
-def _do_set_mode_cli():
-=======
 
 
 def _do_set_mode_cli():
     kill_gui_process(block=True)
     kill_tester_process()
->>>>>>> Stashed changes
     global current_input, command_history, history_index
     mode_var.set("CLI")
     gui_container.pack_forget()
@@ -699,10 +649,7 @@ def _do_set_mode_cli():
     apply_theme()
     if not tester_process or tester_process.poll() is not None:
         run_tester_cli()
-<<<<<<< Updated upstream
-=======
 
->>>>>>> Stashed changes
 
 def set_mode_gui():
     global tester_process
@@ -785,10 +732,7 @@ def themed_check(parent, text, var, command=None):
 
 def run_tester_cli():
     global tester_process, current_input, command_history, history_index
-<<<<<<< Updated upstream
-=======
     kill_gui_process()
->>>>>>> Stashed changes
     kill_tester_process()
     kill_stray_tester_exe()
     cli_terminal.delete("1.0", tk.END)
@@ -808,19 +752,10 @@ def run_tester_cli():
             bufsize=1
         )
         tester_process = proc
-<<<<<<< Updated upstream
-
-        # read line-by-line so ANSI sequences stay intact
-=======
->>>>>>> Stashed changes
         for line in proc.stdout:
             if not line:
                 break
             cli_log(line)
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
         proc.wait()
 
         def done():
@@ -844,10 +779,7 @@ def send_tester_input():
         history_index = None
     current_input = ""
 
-<<<<<<< Updated upstream
-=======
 
->>>>>>> Stashed changes
 def _replace_current_input(new_text: str):
     global current_input
     cli_terminal.mark_set("insert", "end-1c")
@@ -857,10 +789,7 @@ def _replace_current_input(new_text: str):
     cli_terminal.insert("end", new_text)
     cli_terminal.see("end")
 
-<<<<<<< Updated upstream
-=======
 
->>>>>>> Stashed changes
 def on_cli_key(event):
     global current_input, history_index
     cli_terminal.mark_set("insert", "end-1c")
@@ -895,8 +824,6 @@ def on_cli_key(event):
         cli_terminal.see("end")
         return "break"
     return "break"
-<<<<<<< Updated upstream
-=======
 
 
 def toggle_view():
@@ -1024,7 +951,6 @@ def on_tree_right_click(event):
     menu.add_command(label="Delete", command=lambda: _delete_path(path))
     menu.tk_popup(event.x_root, event.y_root)
 
->>>>>>> Stashed changes
 
 root = tk.Tk()
 root.title("File Organizer :: Haughskell357")
