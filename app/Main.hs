@@ -2,13 +2,15 @@ module Main where
 
 import System.Environment (getArgs)
 import System.IO (Handle, hFlush, stdout, hIsTerminalDevice, stdin)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, stripPrefix)
+import Data.Maybe (mapMaybe)
 import Control.Monad (unless, when)
 import System.FilePath (makeRelative)
 import System.Exit (exitFailure)
 
 import Core.Logger (withRunLog)
 import Core.Scanner (listFilesRecursive)
+import Core.RulePresets (CustomRule(..))
 import Core.Organizer
   ( OrganizeOptions(..)
   , organizeByTypeWith
@@ -22,6 +24,12 @@ import Core.Backup
 
 normalizeFlag :: String -> String
 normalizeFlag = dropWhile (== ' ') . filter (/= ' ')
+parseRule :: String -> Maybe CustomRule
+parseRule s = case stripPrefix "--rule=" s of
+  Nothing  -> Nothing
+  Just val -> case break (== ':') val of
+    (kw, ':':folder) | not (null kw) && not (null folder) -> Just (CustomRule kw folder)
+    _ -> Nothing
 
 parseFlags :: [String] -> (OrganizeOptions, Bool, Bool, Bool, Bool, FilePath)
 parseFlags rawArgs =
@@ -29,8 +37,9 @@ parseFlags rawArgs =
       (flags, rest) = span ("--" `isPrefixOf`) args
 
       opts = OrganizeOptions
-        { optDryRun  = "--dry-run"  `elem` flags
-        , optVerbose = "--verbose" `elem` flags
+        { optDryRun      = "--dry-run" `elem` flags
+        , optVerbose     = "--verbose" `elem` flags
+        , optCustomRules = mapMaybe parseRule flags
         }
 
       undoMode    = "--undo"      `elem` flags
