@@ -17,24 +17,6 @@ import Data.Char (toLower)
 import Data.List (isPrefixOf, isInfixOf)
 import Control.Monad (when)
 
-
-ansiReset :: String
-ansiReset = "\x1b[0m"
-
-ansiBold :: String
-ansiBold = "\x1b[1m"
-
-ansiCyan :: String
-ansiCyan = "\x1b[36m"
-
-opTag :: String -> String
-opTag label = ansiBold <> ansiCyan <> "[" <> label <> "]" <> ansiReset <> " "
-
-logOp :: String -> Int -> Int -> IO ()
-logOp label i total =
-  putStrLn $ opTag "op" <> label <> " " <> show i <> "/" <> show total
-
-
 data OrganizeOptions = OrganizeOptions
   { optDryRun      :: Bool
   , optVerbose     :: Bool
@@ -71,26 +53,6 @@ organizeByTypeWith opts root h files = do
 -- | Dry-run wrapper: shows what would happen without moving anything.
 organizeByTypeDryRun :: FilePath -> Handle -> [FilePath] -> IO ()
 organizeByTypeDryRun root h files =
-  organizeByTypeWith (OrganizeOptions True True) root h files
-
-
-processFile :: OrganizeOptions -> FilePath -> Handle -> Maybe (Int, Int) -> FilePath -> IO ()
-processFile opts root h mProgress src = do
-  let rel = makeRelative root src
-
-  -- Progress line (GUI progress bar uses this)
-  case mProgress of
-    Just (i, total) ->
-      putStrLn $
-        "[progress] " <>
-        (if optDryRun opts then "planning " else "moving ") <>
-        show i <> "/" <> show total
-    Nothing -> return ()
-
-  -- ANSI operation tag (same color for all ops)
-  case mProgress of
-    Just (i, total) -> logOp "classify" i total
-    Nothing -> return ()
   organizeByTypeWith (OrganizeOptions True True []) root h files
 
 -- ─── Internal ───────────────────────────────────────────────────────────────
@@ -113,10 +75,7 @@ processFile opts root h mProgress src = do
   result <- try (detectType src) :: IO (Either SomeException String)
   case result of
     Left e -> do
-      putStrLn $
-        opTag "op" <>
-        (if optDryRun opts then "[dry-run] " else "") <>
-        "Skipped " <> rel <> ": " <> show e
+      putStrLn $ (if optDryRun opts then "[dry-run] " else "") ++ "Skipped " ++ rel ++ ": " ++ show e
       logSkip h src (show e)
     Right mime -> do
       let subdir  = case applyRules (optCustomRules opts) fname of
@@ -127,32 +86,17 @@ processFile opts root h mProgress src = do
       dest <- uniqueDest destDir fname
 
       when (optVerbose opts) $
-        putStrLn $
-          opTag "op" <>
-          (if optDryRun opts then "[dry-run] " else "[verbose] ") <>
-          rel <> " classified as " <> mime
+        putStrLn $ (if optDryRun opts then "[dry-run] " else "[verbose] ") ++ rel ++ " classified as " ++ mime
 
       if optDryRun opts
-        then putStrLn $
-          opTag "op" <>
-          "[dry-run] " <> rel <> " -> " <> makeRelative root dest
+        then putStrLn $ "[dry-run] " ++ rel ++ " -> " ++ makeRelative root dest
         else do
           let isNoProgress = case mProgress of { Nothing -> True; _ -> False }
-
           when (optVerbose opts && not isNoProgress) $
-            putStrLn $
-              opTag "op" <>
-              "[verbose] moving to " <> makeRelative root dest
-
-          -- Actual move
+            putStrLn $ "[verbose] moving to " ++ makeRelative root dest
           _ <- renameOrCopy src dest
-
-          putStrLn $
-            opTag "op" <>
-            rel <> " -> " <> makeRelative root dest
-
+          putStrLn $ rel ++ " -> " ++ makeRelative root dest
           logMove h src dest
-
 
 mimeToDir :: String -> String
 mimeToDir mime

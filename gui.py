@@ -38,51 +38,6 @@ LABEL = ("Courier New", 10)
 current_theme = THEMES["dark"]
 tester_process = None
 current_input = ""
-command_history = []
-history_index = None
-
-ANSI_FG_COLORS = {
-    "30": "#000000",
-    "31": "#ff6b6b",
-    "32": "#4caf50",
-    "33": "#d6cf70",
-    "34": "#6aa0ff",
-    "35": "#8c75b8",
-    "36": "#4dd0e1",
-    "37": "#d6cff0",
-}
-
-def insert_ansi(widget, text):
-    i = 0
-    current_tags = []
-    n = len(text)
-    while i < n:
-        ch = text[i]
-        if ch == "\x1b" and i + 1 < n and text[i + 1] == "[":
-            j = i + 2
-            while j < n and text[j] != "m":
-                j += 1
-            if j >= n:
-                break
-            seq = text[i + 2:j]
-            codes = seq.split(";") if seq else []
-            if "0" in codes or not codes:
-                current_tags = []
-            else:
-                for code in codes:
-                    if code in ANSI_FG_COLORS:
-                        current_tags = [t for t in current_tags if not t.startswith("ansi_fg_")]
-                        current_tags.append(f"ansi_fg_{code}")
-                    elif code == "1":
-                        if "ansi_bold" not in current_tags:
-                            current_tags.append("ansi_bold")
-            i = j + 1
-        else:
-            if current_tags:
-                widget.insert(tk.END, ch, tuple(current_tags))
-            else:
-                widget.insert(tk.END, ch)
-            i += 1
 
 def log(text, tag=None):
     if tag:
@@ -92,20 +47,11 @@ def log(text, tag=None):
     output.see(tk.END)
 
 def cli_log(text):
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    insert_ansi(cli_terminal, text)
+    cli_terminal.insert(tk.END, text)
     cli_terminal.see(tk.END)
-
 
 def set_status(text):
     status_var.set(text)
-    lower = text.lower()
-    if "error" in lower or "fail" in lower:
-        status_bar.config(fg=current_theme["ERROR"])
-    elif "running" in lower or "sorting" in lower or "scanning" in lower or "undo" in lower or "cleaning" in lower or "reset" in lower:
-        status_bar.config(fg=current_theme["PROGRESS"])
-    else:
-        status_bar.config(fg=current_theme["ACCENT2"])
 
 def update_progress_from_line(line):
     try:
@@ -182,9 +128,6 @@ def apply_theme():
     style.configure("Thin.Horizontal.TProgressbar",
                     troughcolor=theme["PANEL"],
                     background=theme["PROGRESS"])
-    for code, color in ANSI_FG_COLORS.items():
-        cli_terminal.tag_config(f"ansi_fg_{code}", foreground=color)
-    cli_terminal.tag_config("ansi_bold", font=("Courier New", 10, "bold"))
 
 def set_theme(mode):
     theme_var.set(mode)
@@ -383,22 +326,17 @@ def _do_set_mode_gui():
     cli_button_row.pack_forget()
     gui_container.pack(fill=tk.BOTH, expand=True)
     apply_theme()
-    set_status("Ready")
 
 def _do_set_mode_cli():
-    global current_input, command_history, history_index
+    global current_input
     mode_var.set("CLI")
     gui_container.pack_forget()
     dev_safe_frame.pack(pady=(8, 4))
     cli_terminal.delete("1.0", tk.END)
     current_input = ""
-    command_history = []
-    history_index = None
     cli_terminal.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 4))
     cli_button_row.pack(pady=(0, 8))
     apply_theme()
-    if not tester_process or tester_process.poll() is not None:
-        run_tester_cli()
 
 def set_mode_gui():
     global tester_process
@@ -472,14 +410,11 @@ def themed_check(parent, text, var, command=None):
                           font=LABEL)
 
 def run_tester_cli():
-    global tester_process, current_input, command_history, history_index
+    global tester_process, current_input
     kill_tester_process()
     cli_terminal.delete("1.0", tk.END)
     current_input = ""
-    command_history = []
-    history_index = None
     set_status("Tester running...")
-
     def task():
         global tester_process
         proc = subprocess.Popen(
@@ -488,81 +423,41 @@ def run_tester_cli():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=0
         )
         tester_process = proc
-
-        # read line-by-line so ANSI sequences stay intact
-        for line in proc.stdout:
-            if not line:
+        while True:
+            ch = proc.stdout.read(1)
+            if ch == "" and proc.poll() is not None:
                 break
-            cli_log(line)
-
+            if ch:
+                cli_log(ch)
         proc.wait()
-
         def done():
             set_status("Tester exited")
         root.after(0, done)
-
     threading.Thread(target=task, daemon=True).start()
 
-
-def send_tester_input():
-    global tester_process, current_input, command_history, history_index
-    text = current_input.strip()
-    if tester_process and tester_process.stdin and text:
-        tester_process.stdin.write(text + "\n")
-        tester_process.stdin.flush()
-        cli_terminal.insert("end", "\n")
-        cli_terminal.see("end")
-        if not command_history or command_history[-1] != text:
-            command_history.append(text)
-        history_index = None
-    current_input = ""
-
-def _replace_current_input(new_text: str):
-    global current_input
-    cli_terminal.mark_set("insert", "end-1c")
-    if current_input:
-        cli_terminal.delete(f"end-{len(current_input)+1}c", "end-1c")
-    current_input = new_text
-    cli_terminal.insert("end", new_text)
-    cli_terminal.see("end")
-
 def on_cli_key(event):
-    global current_input, history_index
-    cli_terminal.mark_set("insert", "end-1c")
+    global current_input
     if event.keysym == "BackSpace":
         if current_input:
             current_input = current_input[:-1]
-            cli_terminal.delete("end-2c", "end-1c")
-        return "break"
-    if event.keysym in ("Return", "KP_Enter"):
-        send_tester_input()
-        return "break"
-    if event.keysym == "Up":
-        if command_history:
-            if history_index is None:
-                history_index = len(command_history) - 1
-            else:
-                history_index = max(0, history_index - 1)
-            _replace_current_input(command_history[history_index])
-        return "break"
-    if event.keysym == "Down":
-        if command_history and history_index is not None:
-            if history_index < len(command_history) - 1:
-                history_index += 1
-                _replace_current_input(command_history[history_index])
-            else:
-                history_index = None
-                _replace_current_input("")
-        return "break"
-    if len(event.char) == 1 and event.char.isprintable():
+    elif event.keysym == "Return":
+        pass
+    elif len(event.char) == 1 and event.char.isprintable():
         current_input += event.char
-        cli_terminal.insert("end", event.char)
-        cli_terminal.see("end")
-        return "break"
-    return "break"
+    return None
+
+def send_tester_input(event):
+    global tester_process, current_input
+    if tester_process and tester_process.stdin:
+        text = current_input.strip()
+        if text:
+            tester_process.stdin.write(text + "\n")
+            tester_process.stdin.flush()
+    current_input = ""
+    return None
 
 root = tk.Tk()
 root.title("File Organizer :: Haughskell357")
@@ -729,6 +624,7 @@ cli_terminal = scrolledtext.ScrolledText(content_frame,
                                          relief=tk.FLAT)
 cli_terminal.pack_forget()
 cli_terminal.bind("<Key>", on_cli_key)
+cli_terminal.bind("<Return>", send_tester_input)
 
 cli_button_row = tk.Frame(content_frame, bg=current_theme["BG"])
 start_btn = tk.Button(cli_button_row, text="Start",
