@@ -151,7 +151,6 @@ def cli_log(text):
     insert_ansi(cli_terminal, clean + "\n")
     cli_terminal.see(tk.END)
 
-
 def set_status(text):
     status_var.set(text)
     lower = text.lower()
@@ -630,7 +629,6 @@ def _do_set_mode_gui():
     cli_button_row.pack_forget()
     gui_container.pack(fill=tk.BOTH, expand=True)
     apply_theme()
-    set_status("Ready")
 
 
 def _do_set_mode_cli():
@@ -642,13 +640,9 @@ def _do_set_mode_cli():
     dev_safe_frame.pack(pady=(8, 4))
     cli_terminal.delete("1.0", tk.END)
     current_input = ""
-    command_history = []
-    history_index = None
     cli_terminal.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 4))
     cli_button_row.pack(pady=(0, 8))
     apply_theme()
-    if not tester_process or tester_process.poll() is not None:
-        run_tester_cli()
 
 
 def set_mode_gui():
@@ -737,10 +731,7 @@ def run_tester_cli():
     kill_stray_tester_exe()
     cli_terminal.delete("1.0", tk.END)
     current_input = ""
-    command_history = []
-    history_index = None
     set_status("Tester running...")
-
     def task():
         global tester_process
         proc = subprocess.Popen(
@@ -749,7 +740,7 @@ def run_tester_cli():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=0
         )
         tester_process = proc
         for line in proc.stdout:
@@ -757,12 +748,10 @@ def run_tester_cli():
                 break
             cli_log(line)
         proc.wait()
-
         def done():
             set_status("Tester exited")
 
         root.after(0, done)
-
     threading.Thread(target=task, daemon=True).start()
 
 
@@ -791,39 +780,25 @@ def _replace_current_input(new_text: str):
 
 
 def on_cli_key(event):
-    global current_input, history_index
-    cli_terminal.mark_set("insert", "end-1c")
+    global current_input
     if event.keysym == "BackSpace":
         if current_input:
             current_input = current_input[:-1]
-            cli_terminal.delete("end-2c", "end-1c")
-        return "break"
-    if event.keysym in ("Return", "KP_Enter"):
-        send_tester_input()
-        return "break"
-    if event.keysym == "Up":
-        if command_history:
-            if history_index is None:
-                history_index = len(command_history) - 1
-            else:
-                history_index = max(0, history_index - 1)
-            _replace_current_input(command_history[history_index])
-        return "break"
-    if event.keysym == "Down":
-        if command_history and history_index is not None:
-            if history_index < len(command_history) - 1:
-                history_index += 1
-                _replace_current_input(command_history[history_index])
-            else:
-                history_index = None
-                _replace_current_input("")
-        return "break"
-    if len(event.char) == 1 and event.char.isprintable():
+    elif event.keysym == "Return":
+        pass
+    elif len(event.char) == 1 and event.char.isprintable():
         current_input += event.char
-        cli_terminal.insert("end", event.char)
-        cli_terminal.see("end")
-        return "break"
-    return "break"
+    return None
+
+def send_tester_input(event):
+    global tester_process, current_input
+    if tester_process and tester_process.stdin:
+        text = current_input.strip()
+        if text:
+            tester_process.stdin.write(text + "\n")
+            tester_process.stdin.flush()
+    current_input = ""
+    return None
 
 
 def toggle_view():
@@ -1149,6 +1124,7 @@ cli_terminal = scrolledtext.ScrolledText(content_frame,
                                          relief=tk.FLAT)
 cli_terminal.pack_forget()
 cli_terminal.bind("<Key>", on_cli_key)
+cli_terminal.bind("<Return>", send_tester_input)
 
 cli_button_row = tk.Frame(content_frame, bg=current_theme["BG"])
 start_btn = tk.Button(cli_button_row, text="Start",

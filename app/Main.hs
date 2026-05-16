@@ -22,28 +22,28 @@ import Core.Backup
 
 normalizeFlag :: String -> String
 normalizeFlag = dropWhile (== ' ') . filter (/= ' ')
+parseRule :: String -> Maybe CustomRule
+parseRule s = case stripPrefix "--rule=" s of
+  Nothing  -> Nothing
+  Just val -> case break (== ':') val of
+    (kw, ':':folder) | not (null kw) && not (null folder) -> Just (CustomRule kw folder)
+    _ -> Nothing
 
 parseFlags :: [String] -> (OrganizeOptions, Bool, Bool, Bool, Bool, FilePath)
-parseFlags rawArgs =
-  let args = map normalizeFlag rawArgs
-      (flags, rest) = span ("--" `isPrefixOf`) args
-
+parseFlags args =
+  let (flags, rest) = span ("--" `isPrefixOf`) args
       opts = OrganizeOptions
         { optDryRun  = "--dry-run"  `elem` flags
         , optVerbose = "--verbose" `elem` flags
         }
-
       undoMode    = "--undo"      `elem` flags
       cleanupMode = "--cleanup"   `elem` flags
       scanMode    = "--scan"      `elem` flags
       noPrompt    = "--no-prompt" `elem` flags
-
       dir = case rest of
               []    -> "<NO_ROOT>"
               (d:_) -> d
-
   in (opts, undoMode, cleanupMode, scanMode, noPrompt, dir)
-
 
 main :: IO ()
 main = do
