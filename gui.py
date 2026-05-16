@@ -6,6 +6,7 @@ import threading
 import os
 import sys
 import shutil
+import time
 
 THEMES = {
     "dark": {
@@ -18,8 +19,10 @@ THEMES = {
         "DRY": "#d6cf70",
         "PROGRESS": "#6aa0ff",
         "STATUS_BG": "#11101a",
-        "BROWN": "#4a3f32"
-    },
+        "BROWN": "#4a3f32",
+        "OP": "#c792ea",     
+        "VERBOSE": "#82aaff",  
+        },
     "light": {
         "BG": "#e7e6e1",
         "PANEL": "#f4f3ef",
@@ -30,7 +33,9 @@ THEMES = {
         "DRY": "#8c7a2e",
         "PROGRESS": "#4caf50",
         "STATUS_BG": "#dcd9d2",
-        "BROWN": "#d2c4b2"
+        "BROWN": "#d2c4b2",
+        "OP": "#7b3fbf", 
+        "VERBOSE": "#005fcc",  
     }
 }
 
@@ -57,20 +62,38 @@ ANSI_FG_COLORS = {
 }
 
 
+ansi_buffer = ""
+
 def insert_ansi(widget, text):
+    global ansi_buffer
+
+   
+    text = ansi_buffer + text
+    ansi_buffer = ""
+
     i = 0
     current_tags = []
     n = len(text)
+
     while i < n:
         ch = text[i]
+
+    
         if ch == "\x1b" and i + 1 < n and text[i + 1] == "[":
             j = i + 2
+
+     
             while j < n and text[j] != "m":
                 j += 1
+
+         
             if j >= n:
-                break
+                ansi_buffer = text[i:]
+                return
+
             seq = text[i + 2:j]
             codes = seq.split(";") if seq else []
+
             if "0" in codes or not codes:
                 current_tags = []
             else:
@@ -81,13 +104,24 @@ def insert_ansi(widget, text):
                     elif code == "1":
                         if "ansi_bold" not in current_tags:
                             current_tags.append("ansi_bold")
+
             i = j + 1
+            continue
+
+       
+        if current_tags:
+            widget.insert(tk.END, ch, tuple(current_tags))
         else:
-            if current_tags:
-                widget.insert(tk.END, ch, tuple(current_tags))
-            else:
-                widget.insert(tk.END, ch)
-            i += 1
+            widget.insert(tk.END, ch)
+
+        i += 1
+
+
+import re
+ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+def strip_ansi(s):
+    return ANSI_RE.sub("", s)
 
 
 def _clean_text(text: str) -> str:
@@ -95,16 +129,19 @@ def _clean_text(text: str) -> str:
     clean = "\n".join([line for line in clean.split("\n") if line.strip() != ""])
     return clean
 
-
 def log(text, tag=None):
-    clean = _clean_text(text)
+    clean = strip_ansi(_clean_text(text))
     if not clean:
         return
+    output.config(state="normal")
     if tag:
         output.insert(tk.END, clean + "\n", tag)
     else:
         output.insert(tk.END, clean + "\n")
+    output.config(state="disabled")
     output.see(tk.END)
+
+
 
 
 def cli_log(text):
@@ -219,8 +256,9 @@ def apply_theme():
     output.tag_config("error", foreground=theme["ERROR"])
     output.tag_config("dry", foreground=theme["DRY"])
     output.tag_config("progress", foreground=theme["PROGRESS"])
-    output.tag_config("verbose", foreground=theme["ACCENT2"])
+    output.tag_config("verbose", foreground=theme["VERBOSE"])
     output.tag_config("info", foreground=theme["ACCENT2"])
+    output.tag_config("op", foreground=current_theme["OP"])
 
     toggle_view_btn.config(
     bg=theme["ACCENT"],
@@ -249,6 +287,11 @@ def apply_theme():
     for code, color in ANSI_FG_COLORS.items():
         cli_terminal.tag_config(f"ansi_fg_{code}", foreground=color)
     cli_terminal.tag_config("ansi_bold", font=("Courier New", 10, "bold"))
+    #for code, color in ANSI_FG_COLORS.items():
+     #   output.tag_config(f"ansi_fg_{code}", foreground=color)
+
+    #output.tag_config("ansi_bold", font=("Courier New", 10, "bold"))
+
 
     _update_toggle_button_label()
     cli_terminal.update_idletasks()
@@ -306,7 +349,6 @@ def kill_gui_process(block=False):
     gui_process = None
 
 
-
 def run_cmd(cmd, on_done):
     def task():
         global gui_process
@@ -323,28 +365,46 @@ def run_cmd(cmd, on_done):
         )
         gui_process = proc
 
-        for line in proc.stdout:
-            tag = None
-            if line.startswith("[progress]"):
-                tag = "progress"
-                update_progress_from_line(line)
-            elif line.startswith("[verbose]"):
-                tag = "verbose"
-            elif line.startswith("[dry-run]"):
-                tag = "dry"
-            log(line, tag)
+        while True:
+            line = proc.stdout.readline()
+
+            if line:
+                clean = strip_ansi(line)
+
+                tag = None
+                if clean.startswith("[progress]"):
+                    tag = "progress"
+                    update_progress_from_line(clean)
+                elif clean.startswith("[verbose]"):
+                    tag = "verbose"
+                elif clean.startswith("[dry-run]"):
+                    tag = "dry"
+                elif clean.startswith("[error]"):
+                    tag = "error"
+                elif clean.startswith("[info]"):
+                    tag = "info"
+                elif clean.startswith("[op]"):
+                    tag = "op"
+
+                log(clean, tag)
+
+            else:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.01)
+                continue
 
         try:
             proc.wait()
         except Exception:
             pass
 
-        
         gui_process = None
-
         root.after(0, on_done)
 
     threading.Thread(target=task, daemon=True).start()
+
+
 
 
 
@@ -1050,6 +1110,7 @@ output = scrolledtext.ScrolledText(view_stack,
                                    fg=current_theme["FG"],
                                    insertbackground=current_theme["FG"],
                                    relief=tk.FLAT)
+output.config(state="disabled")
 output.pack(fill=tk.BOTH, expand=True)
 
 explorer_frame = tk.Frame(view_stack, bg=current_theme["BG"])
