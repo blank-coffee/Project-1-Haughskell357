@@ -48,6 +48,7 @@ gui_process = None
 current_input = ""
 command_history = []
 history_index = None
+prompt_timer = None
 current_view = "logs"  
 
 ANSI_FG_COLORS = {
@@ -67,26 +68,33 @@ ansi_buffer = ""
 def insert_ansi(widget, text):
     global ansi_buffer
 
-   
     text = ansi_buffer + text
     ansi_buffer = ""
 
     i = 0
-    current_tags = []
     n = len(text)
+    current_tags = []
 
     while i < n:
         ch = text[i]
 
-    
-        if ch == "\x1b" and i + 1 < n and text[i + 1] == "[":
-            j = i + 2
+        
+        if ch == "\x1b":
+          
+            if i + 1 >= n:
+                ansi_buffer = text[i:]
+                return
 
-     
+            
+            if text[i + 1] != "[":
+                ansi_buffer = text[i:]
+                return
+
+            j = i + 2
             while j < n and text[j] != "m":
                 j += 1
 
-         
+  
             if j >= n:
                 ansi_buffer = text[i:]
                 return
@@ -109,12 +117,9 @@ def insert_ansi(widget, text):
             continue
 
        
-        if current_tags:
-            widget.insert(tk.END, ch, tuple(current_tags))
-        else:
-            widget.insert(tk.END, ch)
-
+        widget.insert("end", ch, tuple(current_tags) if current_tags else None)
         i += 1
+
 
 
 import re
@@ -143,13 +148,25 @@ def log(text, tag=None):
 
 
 
-
 def cli_log(text):
+    global prompt_timer
+
     clean = _clean_text(text)
     if not clean:
         return
+
     insert_ansi(cli_terminal, clean + "\n")
-    cli_terminal.see(tk.END)
+    cli_terminal.update_idletasks()
+    cli_terminal.see("end")
+
+    if prompt_timer is not None:
+        root.after_cancel(prompt_timer)
+
+    if clean.strip().endswith("Choice:"):
+        cli_terminal.insert("end", "> ")
+
+
+
 
 def set_status(text):
     status_var.set(text)
@@ -257,7 +274,7 @@ def apply_theme():
     output.tag_config("progress", foreground=theme["PROGRESS"])
     output.tag_config("verbose", foreground=theme["VERBOSE"])
     output.tag_config("info", foreground=theme["ACCENT2"])
-    output.tag_config("op", foreground=current_theme["OP"])
+    output.tag_config("op_tag", foreground=current_theme["OP"])
 
     toggle_view_btn.config(
     bg=theme["ACCENT"],
@@ -286,10 +303,7 @@ def apply_theme():
     for code, color in ANSI_FG_COLORS.items():
         cli_terminal.tag_config(f"ansi_fg_{code}", foreground=color)
     cli_terminal.tag_config("ansi_bold", font=("Courier New", 10, "bold"))
-    #for code, color in ANSI_FG_COLORS.items():
-     #   output.tag_config(f"ansi_fg_{code}", foreground=color)
 
-    #output.tag_config("ansi_bold", font=("Courier New", 10, "bold"))
 
 
     _update_toggle_button_label()
@@ -383,7 +397,7 @@ def run_cmd(cmd, on_done):
                 elif clean.startswith("[info]"):
                     tag = "info"
                 elif clean.startswith("[op]"):
-                    tag = "op"
+                    tag = "op_tag"
 
                 log(clean, tag)
 
@@ -629,6 +643,7 @@ def _do_set_mode_gui():
     cli_button_row.pack_forget()
     gui_container.pack(fill=tk.BOTH, expand=True)
     apply_theme()
+    set_status("Ready")
 
 
 def _do_set_mode_cli():
@@ -640,9 +655,13 @@ def _do_set_mode_cli():
     dev_safe_frame.pack(pady=(8, 4))
     cli_terminal.delete("1.0", tk.END)
     current_input = ""
+    command_history = []
+    history_index = None
     cli_terminal.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 4))
     cli_button_row.pack(pady=(0, 8))
     apply_theme()
+    if not tester_process or tester_process.poll() is not None:
+        run_tester_cli()
 
 
 def set_mode_gui():
@@ -723,7 +742,6 @@ def themed_check(parent, text, var, command=None):
                           activeforeground=current_theme["FG"],
                           font=LABEL)
 
-
 def run_tester_cli():
     global tester_process, current_input, command_history, history_index
     kill_gui_process()
@@ -731,7 +749,10 @@ def run_tester_cli():
     kill_stray_tester_exe()
     cli_terminal.delete("1.0", tk.END)
     current_input = ""
+    command_history = []
+    history_index = None
     set_status("Tester running...")
+
     def task():
         global tester_process
         proc = subprocess.Popen(
@@ -740,38 +761,44 @@ def run_tester_cli():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=0
+            bufsize=1
         )
         tester_process = proc
+
+        first_output = True
+
         for line in proc.stdout:
             if not line:
                 break
-            cli_log(line)
-        proc.wait()
-        def done():
-            set_status("Tester exited")
 
-        root.after(0, done)
+            cli_log(line)
+
+
+        proc.wait()
+        root.after(0, lambda: set_status("Tester exited"))
+
     threading.Thread(target=task, daemon=True).start()
+
 
 
 def send_tester_input():
     global tester_process, current_input, command_history, history_index
     text = current_input.strip()
+
     if tester_process and tester_process.stdin and text:
         tester_process.stdin.write(text + "\n")
         tester_process.stdin.flush()
-        cli_terminal.insert("end", "\n")
-        cli_terminal.see("end")
+
         if not command_history or command_history[-1] != text:
             command_history.append(text)
-        history_index = None
+
+    history_index = None
     current_input = ""
 
 
 def _replace_current_input(new_text: str):
     global current_input
-    cli_terminal.mark_set("insert", "end-1c")
+    cli_terminal.mark_set("insert", "end")
     if current_input:
         cli_terminal.delete(f"end-{len(current_input)+1}c", "end-1c")
     current_input = new_text
@@ -779,26 +806,59 @@ def _replace_current_input(new_text: str):
     cli_terminal.see("end")
 
 
+
 def on_cli_key(event):
-    global current_input
+    global current_input, history_index
+
+    cli_terminal.mark_set("insert", "end")
+
+
     if event.keysym == "BackSpace":
         if current_input:
             current_input = current_input[:-1]
-    elif event.keysym == "Return":
-        pass
-    elif len(event.char) == 1 and event.char.isprintable():
-        current_input += event.char
-    return None
+            cli_terminal.delete("end-2c", "end-1c")
+        return "break"
 
-def send_tester_input(event):
-    global tester_process, current_input
-    if tester_process and tester_process.stdin:
-        text = current_input.strip()
-        if text:
-            tester_process.stdin.write(text + "\n")
-            tester_process.stdin.flush()
-    current_input = ""
-    return None
+
+    if event.keysym in ("Return", "KP_Enter"):
+        send_tester_input()
+        cli_terminal.insert("end", "\n") 
+        return "break"
+
+
+    if event.keysym == "Up":
+        if command_history:
+            if history_index is None:
+                history_index = len(command_history) - 1
+            else:
+                history_index = max(0, history_index - 1)
+            cli_terminal.delete("end-1c linestart", "end-1c")
+            current_input = command_history[history_index]
+            cli_terminal.insert("end", current_input)
+        return "break"
+
+
+    if event.keysym == "Down":
+        if command_history and history_index is not None:
+            if history_index < len(command_history) - 1:
+                history_index += 1
+                current_input = command_history[history_index]
+            else:
+                history_index = None
+                current_input = ""
+            cli_terminal.delete("end-1c linestart", "end-1c")
+            cli_terminal.insert("end", current_input)
+        return "break"
+
+
+    if len(event.char) == 1 and event.char.isprintable():
+        current_input += event.char
+        cli_terminal.insert("end", event.char)
+        cli_terminal.see("end")
+        return "break"
+
+    return "break"
+
 
 
 def toggle_view():
@@ -1124,7 +1184,6 @@ cli_terminal = scrolledtext.ScrolledText(content_frame,
                                          relief=tk.FLAT)
 cli_terminal.pack_forget()
 cli_terminal.bind("<Key>", on_cli_key)
-cli_terminal.bind("<Return>", send_tester_input)
 
 cli_button_row = tk.Frame(content_frame, bg=current_theme["BG"])
 start_btn = tk.Button(cli_button_row, text="Start",

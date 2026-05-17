@@ -5,19 +5,22 @@ module Core.Organizer
   , organizeByTypeDryRun
   ) where
 
+import Core.RulePresets (CustomRule(..))
 import Core.Detect (detectType)
 import Core.Dedupe (renameOrCopy, uniqueDest)
 import Core.Logger (logMove, logSkip)
 import System.Directory (createDirectoryIfMissing)
-import System.FilePath (takeFileName, makeRelative)
+import System.FilePath ((</>), takeFileName, makeRelative, takeDirectory, equalFilePath)
 import System.IO (Handle)
 import Control.Exception (try, SomeException)
-import Data.List (isPrefixOf)
+import Data.Char (toLower)
+import Data.List (isPrefixOf, isInfixOf)
 import Control.Monad (when)
 
 data OrganizeOptions = OrganizeOptions
   { optDryRun  :: Bool
   , optVerbose :: Bool
+  , optCustomRules :: [CustomRule]
   }
 
 ignoredNames :: [String]
@@ -32,7 +35,7 @@ ensureDirs root = do
 organizeByType :: FilePath -> Handle -> [FilePath] -> IO ()
 organizeByType root h files = do
   ensureDirs root
-  mapM_ (processFile (OrganizeOptions False False) root h Nothing) files
+  mapM_ (processFile (OrganizeOptions False False []) root h Nothing) files
 
 organizeByTypeWith :: OrganizeOptions -> FilePath -> Handle -> [FilePath] -> IO ()
 organizeByTypeWith opts root h files = do
