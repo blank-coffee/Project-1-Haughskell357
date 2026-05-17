@@ -2,15 +2,15 @@ module Main where
 
 import System.Environment (getArgs)
 import System.IO (Handle, hFlush, stdout, hIsTerminalDevice, stdin)
-import Data.List (isPrefixOf, stripPrefix)
-import Data.Maybe (mapMaybe)
+import Data.List (isPrefixOf)
 import Control.Monad (unless, when)
 import System.FilePath (makeRelative)
+import Data.List (isPrefixOf, stripPrefix)
+import Data.Maybe (mapMaybe)
 import System.Exit (exitFailure)
-
+import Core.RulePresets (CustomRule(..))
 import Core.Logger (withRunLog)
 import Core.Scanner (listFilesRecursive)
-import Core.RulePresets (CustomRule(..))
 import Core.Organizer
   ( OrganizeOptions(..)
   , organizeByTypeWith
@@ -22,6 +22,8 @@ import Core.Backup
   , cleanupBackup
   )
 
+normalizeFlag :: String -> String
+normalizeFlag = dropWhile (== ' ') . filter (/= ' ')
 parseRule :: String -> Maybe CustomRule
 parseRule s = case stripPrefix "--rule=" s of
   Nothing  -> Nothing
@@ -32,10 +34,11 @@ parseRule s = case stripPrefix "--rule=" s of
 parseFlags :: [String] -> (OrganizeOptions, Bool, Bool, Bool, Bool, FilePath)
 parseFlags args =
   let (flags, rest) = span ("--" `isPrefixOf`) args
+      customRules = mapMaybe parseRule flags
       opts = OrganizeOptions
-        { optDryRun      = "--dry-run" `elem` flags
+        { optDryRun      = "--dry-run"  `elem` flags
         , optVerbose     = "--verbose" `elem` flags
-        , optCustomRules = mapMaybe parseRule flags
+        , optCustomRules = customRules
         }
       undoMode    = "--undo"      `elem` flags
       cleanupMode = "--cleanup"   `elem` flags
@@ -45,6 +48,7 @@ parseFlags args =
               []    -> "<NO_ROOT>"
               (d:_) -> d
   in (opts, undoMode, cleanupMode, scanMode, noPrompt, dir)
+
 
 main :: IO ()
 main = do

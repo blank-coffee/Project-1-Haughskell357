@@ -18,8 +18,8 @@ import Data.List (isPrefixOf, isInfixOf)
 import Control.Monad (when)
 
 data OrganizeOptions = OrganizeOptions
-  { optDryRun      :: Bool
-  , optVerbose     :: Bool
+  { optDryRun  :: Bool
+  , optVerbose :: Bool
   , optCustomRules :: [CustomRule]
   }
 
@@ -32,25 +32,18 @@ ensureDirs root = do
   createDirectoryIfMissing True (root <> "/images")
   createDirectoryIfMissing True (root <> "/other")
 
--- | Simple organizer: MIME-based only, no options. Used by tests.
 organizeByType :: FilePath -> Handle -> [FilePath] -> IO ()
 organizeByType root h files = do
   ensureDirs root
   mapM_ (processFile (OrganizeOptions False False []) root h Nothing) files
 
--- | Full organizer: respects options including custom sort rules.
 organizeByTypeWith :: OrganizeOptions -> FilePath -> Handle -> [FilePath] -> IO ()
 organizeByTypeWith opts root h files = do
   ensureDirs root
-  let customFolders   = map ruleFolder (optCustomRules opts)
-      outputDirs      = map (root </>) (["text", "images", "other", "deleteme"] ++ customFolders)
-      alreadySorted p = any (equalFilePath (takeDirectory p)) outputDirs
-      files'          = filter (\p -> takeFileName p `notElem` ignoredNames
-                                   && not (alreadySorted p)) files
-      total           = length files'
+  let files' = filter (\p -> takeFileName p `notElem` ignoredNames) files
+      total  = length files'
   mapM_ (\(i, fp) -> processFile opts root h (Just (i, total)) fp) (zip [1..] files')
 
--- | Dry-run wrapper: shows what would happen without moving anything.
 organizeByTypeDryRun :: FilePath -> Handle -> [FilePath] -> IO ()
 organizeByTypeDryRun root h files =
   organizeByTypeWith (OrganizeOptions True True []) root h files
@@ -77,13 +70,11 @@ processFile opts root h mProgress src = do
     Left e -> do
       putStrLn $ (if optDryRun opts then "[dry-run] " else "") ++ "Skipped " ++ rel ++ ": " ++ show e
       logSkip h src (show e)
+
     Right mime -> do
-      let subdir  = case applyRules (optCustomRules opts) fname of
-                      Just folder -> folder
-                      Nothing     -> mimeToDir mime
+      let subdir  = mimeToDir mime
           destDir = root <> "/" <> subdir
-      createDirectoryIfMissing True destDir
-      dest <- uniqueDest destDir fname
+      dest <- uniqueDest destDir (takeFileName src)
 
       when (optVerbose opts) $
         putStrLn $ (if optDryRun opts then "[dry-run] " else "[verbose] ") ++ rel ++ " classified as " ++ mime
